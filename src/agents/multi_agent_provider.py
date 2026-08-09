@@ -59,11 +59,13 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         sample_style: Optional[str] = None,
         custom_sample_text: Optional[str] = None,
         quality_threshold: float = 0.70,
+        write_content_engine: str = "chatgpt_web",
     ) -> None:
         self._browser_mgr = browser_mgr
         self._openai_provider = openai_provider
         self._sample_style = sample_style
         self._custom_sample_text = custom_sample_text
+        self._write_content_engine = write_content_engine
         self._tabs_initialized = False  # Track whether Tab 1 & Tab 2 have been setup
 
     # ------------------------------------------------------------------
@@ -86,10 +88,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if not self._browser_mgr:
             raise ReviewError("Browser Manager chưa được khởi tạo.")
 
-        # ── Pre-flight check: Verify Gemini Web & ChatGPT Web Authentication ──
+        tab2_label = "ChatGPT Web" if self._write_content_engine == "chatgpt_web" else "Gemini Web"
+
+        # ── Pre-flight check: Verify Authentication ──
         if progress_cb:
-            progress_cb("Kiểm tra cookie đăng nhập Gemini Web & ChatGPT Web...", 0.02)
-        _logger.info("Verifying Gemini Web and ChatGPT Web cookie status...")
+            progress_cb(f"Kiểm tra cookie đăng nhập Gemini Web & {tab2_label}...", 0.02)
+        _logger.info("Verifying Gemini Web and {} cookie status...", tab2_label)
 
         session_mgr = self._browser_mgr._session_mgr
 
@@ -101,8 +105,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 "Vui lòng bấm '🍪 Cookie Gemini' trên giao diện để nạp cookie!"
             )
 
-        # 2. Check ChatGPT Session (Tab 2)
-        if not session_mgr.has_chatgpt_session():
+        # 2. Check ChatGPT Session (Tab 2) if chatgpt_web selected
+        if self._write_content_engine == "chatgpt_web" and not session_mgr.has_chatgpt_session():
             raise ReviewError(
                 "⚠️ Chưa có Cookie ChatGPT Web (Tab 2)!\n"
                 "Tab 2 cần Cookie ChatGPT để biên soạn kịch bản content.\n"
@@ -136,16 +140,17 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 media_path=None,
                 job_id="setup_tab1",
                 progress_callback=progress_cb,
+                write_content_engine=self._write_content_engine,
             )
             _logger.info("Tab 1 setup complete.")
         except Exception as exc:
             _logger.error("Tab 1 setup failed: {}", exc)
             raise ReviewError(f"Lỗi khởi động Tab 1: {exc}") from exc
 
-        # ── Tab 2: Setup Writer Role (ChatGPT Web) ──
+        # ── Tab 2: Setup Writer Role ──
         if progress_cb:
-            progress_cb("Khởi động Tab 2 (ChatGPT Web: Viết content)...", 0.08)
-        _logger.info("Setting up Tab 2 (ChatGPT Web) with JOB 2 system prompt...")
+            progress_cb(f"Khởi động Tab 2 ({tab2_label}: Viết content)...", 0.08)
+        _logger.info("Setting up Tab 2 ({}) with JOB 2 system prompt...", tab2_label)
         try:
             self._browser_mgr.send_prompt_to_stage(
                 stage_idx=2,
@@ -153,11 +158,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 media_path=None,
                 job_id="setup_tab2",
                 progress_callback=progress_cb,
+                write_content_engine=self._write_content_engine,
             )
-            _logger.info("Tab 2 (ChatGPT Web) setup complete.")
+            _logger.info("Tab 2 ({}) setup complete.", tab2_label)
         except Exception as exc:
-            _logger.error("Tab 2 (ChatGPT Web) setup failed: {}", exc)
-            raise ReviewError(f"Lỗi khởi động Tab 2 (ChatGPT Web): {exc}") from exc
+            _logger.error("Tab 2 ({}) setup failed: {}", tab2_label, exc)
+            raise ReviewError(f"Lỗi khởi động Tab 2 ({tab2_label}): {exc}") from exc
 
         self._tabs_initialized = True
 
@@ -236,6 +242,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 media_path=None,
                 job_id=f"{job_id}_clip{clip_idx}_tab2",
                 progress_callback=progress_cb,
+                write_content_engine=self._write_content_engine,
             )
             txt = resp2.text.strip()
             for prefix in ["gemini đã nói", "gemini said", "gemini:"]:
@@ -506,7 +513,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 session_mgr = self._browser_mgr._session_mgr
                 if not session_mgr.has_session_file():
                     return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Chưa có Cookie Gemini Web (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
-                if not session_mgr.has_chatgpt_session():
+                if self._write_content_engine == "chatgpt_web" and not session_mgr.has_chatgpt_session():
                     return Result.Err(ReviewError("❌ [Lỗi ChatGPT Web] Chưa có Cookie ChatGPT Web (Tab 2). Vui lòng bấm '🤖 Cookie ChatGPT' để nạp cookie!"))
                 return Result.Ok(True)
             except Exception as exc:

@@ -463,11 +463,11 @@ class BrowserManager:
                     for (let b of buttons) {
                         let text = (b.innerText || '').toLowerCase();
                         let aria = (b.getAttribute('aria-label') || '').toLowerCase();
-                        let svg = b.querySelector('svg, mat-icon');
-                        if (aria.includes('send') || aria.includes('gửi') || text.includes('send') || text.includes('gửi') || svg) {
+                        let testid = (b.getAttribute('data-testid') || '').toLowerCase();
+                        if (aria.includes('send') || aria.includes('gửi') || aria.includes('submit') || testid.includes('send') || text.includes('send') || text.includes('gửi')) {
                             let rect = b.getBoundingClientRect();
-                            if (rect.width > 15 && rect.height > 15) {
-                                return { id: b.id, aria: b.getAttribute('aria-label') };
+                            if (rect.width > 10 && rect.height > 10) {
+                                return { id: b.id, aria: b.getAttribute('aria-label'), testid: b.getAttribute('data-testid') };
                             }
                         }
                     }
@@ -476,12 +476,14 @@ class BrowserManager:
                 """
                 info = page.evaluate(js_script)
                 if info:
-                    if info.get("aria"):
+                    if info.get("testid"):
+                        discovered_sel = f"button[data-testid='{info['testid']}']"
+                    elif info.get("aria"):
                         discovered_sel = f"button[aria-label='{info['aria']}']"
                     elif info.get("id"):
                         discovered_sel = f"#{info['id']}"
                     else:
-                        discovered_sel = "button:has(svg), button:has(mat-icon)"
+                        discovered_sel = "button[data-testid='send-button']"
                     loc = page.locator(discovered_sel).first
                     if loc.is_visible(timeout=1000):
                         self._logger.info("Auto-discovered send button selector: '{}'", discovered_sel)
@@ -823,11 +825,11 @@ class BrowserManager:
             self._logger.warning("Error checking login status: {}", exc)
             return SessionStatus.NOT_LOGGED_IN
 
-    def get_stage_page(self, stage_idx: int) -> Page:
-        """Get or create persistent tab for Stage 1 (Tab 1 - Gemini) or Stage 2 (Tab 2 - ChatGPT Web)."""
-        return self._on_browser_thread(self._get_stage_page_impl, stage_idx)
+    def get_stage_page(self, stage_idx: int, write_content_engine: str = "chatgpt_web") -> Page:
+        """Get or create persistent tab for Stage 1 (Gemini) or Stage 2 (ChatGPT / Gemini Web)."""
+        return self._on_browser_thread(self._get_stage_page_impl, stage_idx, write_content_engine)
 
-    def _get_stage_page_impl(self, stage_idx: int) -> Page:
+    def _get_stage_page_impl(self, stage_idx: int, write_content_engine: str = "chatgpt_web") -> Page:
         with BrowserManager._singleton_lock:
             first_page = self._ensure_browser(headless=False)
             ctx = BrowserManager._singleton_context
@@ -837,13 +839,18 @@ class BrowserManager:
                 if stage_idx == 1:
                     page = pages[0] if len(pages) > 0 else ctx.new_page()
                     target_url = self._config.base_url  # https://gemini.google.com
+                    domain_check = "gemini.google.com"
                 else:
                     page = pages[1] if len(pages) > 1 else ctx.new_page()
-                    target_url = "https://chatgpt.com"
+                    if write_content_engine == "gemini_web":
+                        target_url = self._config.base_url  # https://gemini.google.com
+                        domain_check = "gemini.google.com"
+                    else:
+                        target_url = "https://chatgpt.com"
+                        domain_check = "chatgpt.com"
 
                 try:
                     self._bring_chrome_to_front(page)
-                    domain_check = "gemini.google.com" if stage_idx == 1 else "chatgpt.com"
                     if domain_check not in page.url.lower():
                         page.goto(target_url, wait_until="commit", timeout=12000)
                         time.sleep(1.5)
@@ -863,8 +870,9 @@ class BrowserManager:
         media_path: Optional[Path] = None,
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
+        write_content_engine: str = "chatgpt_web",
     ) -> GeminiWebResponse:
-        """Send prompt to Stage 1 (Gemini Web) or Stage 2 (ChatGPT Web)."""
+        """Send prompt to Stage 1 (Gemini Web) or Stage 2 (ChatGPT Web / Gemini Web)."""
         return self._on_browser_thread(
             self._send_prompt_to_stage_impl,
             stage_idx,
@@ -872,6 +880,7 @@ class BrowserManager:
             media_path,
             job_id,
             progress_callback,
+            write_content_engine,
         )
 
     def _send_prompt_to_stage_impl(
@@ -881,6 +890,7 @@ class BrowserManager:
         media_path: Optional[Path] = None,
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
+        write_content_engine: str = "chatgpt_web",
     ) -> GeminiWebResponse:
         """Internal implementation executing strictly on dedicated browser thread."""
         start_time = time.time()
@@ -893,11 +903,11 @@ class BrowserManager:
 
         with BrowserManager._job_queue_lock:
             _notify(f"Tab {stage_idx} (Đang mở trình duyệt)", 0.05)
-            page = self.get_stage_page(stage_idx)
+            page = self.get_stage_page(stage_idx, write_content_engine=write_content_engine)
 
             self._bring_chrome_to_front(page)
 
-            if stage_idx == 2:
+            if stage_idx == 2 and write_content_engine == "chatgpt_web":
                 # -------------------------------------------------------------
                 # STAGE 2: CHATGPT WEB WORKFLOW
                 # -------------------------------------------------------------
@@ -941,37 +951,44 @@ class BrowserManager:
                     except Exception:
                         pass
                     try:
-                        input_box.click(timeout=3000)
+                        input_box.click(timeout=1000)
                     except Exception:
-                        input_box.click(force=True, timeout=2000)
-                    time.sleep(0.3)
+                        pass
                     page.keyboard.insert_text(prompt)
-                    time.sleep(0.8)
+                    time.sleep(0.3)
+                    try:
+                        page.evaluate("el => el.dispatchEvent(new Event('input', { bubbles: true }))", input_box.element_handle())
+                    except Exception:
+                        pass
                 except Exception as exc:
                     # Fallback to direct fill if click/keyboard fails
                     try:
                         input_box.fill(prompt)
-                        time.sleep(0.8)
+                        time.sleep(0.3)
                     except Exception as fill_exc:
                         self.save_dom_snapshot(page, f"Failed typing prompt to ChatGPT: {exc}", job_id)
                         raise GeminiWebDOMError(f"Failed entering text into ChatGPT input: {fill_exc}") from fill_exc
 
-                # Click Send
-                send_btn, send_sel = self._find_element_with_fallback(
-                    page,
-                    CHATGPT_SEND_SELECTORS,
-                    description="ChatGPT Send Button",
-                    target_type="send_button",
-                    timeout_per_selector_ms=800,
-                    max_retries=2,
-                    check_enabled=True,
-                )
-                if send_btn is not None:
+                # Fast Send Submission for ChatGPT
+                sent = False
+                for s_sel in [
+                    "button[data-testid='send-button']",
+                    "button[aria-label*='Send' i]",
+                    "button[aria-label*='Gửi' i]",
+                    "button[aria-label*='gửi' i]",
+                ]:
                     try:
-                        send_btn.click()
+                        btn = page.locator(s_sel).first
+                        if btn.is_visible(timeout=300) and btn.is_enabled():
+                            btn.click(timeout=1000)
+                            sent = True
+                            self._logger.info("[Tab 2] Clicked ChatGPT Send Button via '{}'", s_sel)
+                            break
                     except Exception:
-                        page.keyboard.press("Enter")
-                else:
+                        continue
+
+                if not sent:
+                    self._logger.info("[Tab 2] Pressing Enter to send ChatGPT prompt...")
                     page.keyboard.press("Enter")
 
                 # Wait for ChatGPT response

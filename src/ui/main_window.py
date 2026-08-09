@@ -166,6 +166,8 @@ class MainWindow(ctk.CTk):
 
         # Gemini Web provider & API Key / State Variables
         self._gemini_web_provider = GeminiWebProvider()
+        self._review_video_engine_var = ctk.StringVar(value="gemini_web")
+        self._write_content_engine_var = ctk.StringVar(value="chatgpt_web")
         self._gemini_api_key_var = ctk.StringVar(value=os.getenv("GEMINI_API_KEY", ""))
         self._openai_key_var = ctk.StringVar(value=os.getenv("OPENAI_API_KEY", ""))
         self._openai_model_var = ctk.StringVar(value=os.getenv("OPENAI_MODEL", "gpt-4o"))
@@ -395,17 +397,79 @@ class MainWindow(ctk.CTk):
             text_color=TEXT_ACCENT,
         ).pack(anchor="w", padx=12, pady=(4, 2))
 
-        # Gemini Web – engine duy nhất
-        self._ai_engine_var = ctk.StringVar(value="gemini_web")
+        # Container cho 2 dòng lựa chọn Engine kiểu ô tròn (Radio buttons)
+        engines_frame = ctk.CTkFrame(ai_card, fg_color="#1a2744", corner_radius=8)
+        engines_frame.pack(fill="x", padx=12, pady=(2, 4))
 
-        engine_badge = ctk.CTkFrame(ai_card, fg_color="#1a2744", corner_radius=8)
-        engine_badge.pack(fill="x", padx=12, pady=(2, 4))
+        # Dòng 1: Review video
+        row1 = ctk.CTkFrame(engines_frame, fg_color="transparent")
+        row1.pack(fill="x", padx=10, pady=(6, 3))
+        
         ctk.CTkLabel(
-            engine_badge,
-            text="🌐  Gemini Web  —  Playwright Automation (Miễn phí)",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=TEXT_ACCENT,
-        ).pack(anchor="w", padx=12, pady=6)
+            row1,
+            text="1. Review video:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+            width=110,
+            anchor="w",
+        ).pack(side="left")
+
+        rb_rev_gemini = ctk.CTkRadioButton(
+            row1,
+            text="Gemini Web",
+            variable=self._review_video_engine_var,
+            value="gemini_web",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color=ACCENT_BLUE_HOVER,
+        )
+        rb_rev_gemini.pack(side="left", padx=(0, 15))
+
+        rb_rev_aistudio = ctk.CTkRadioButton(
+            row1,
+            text="Google AI Studio",
+            variable=self._review_video_engine_var,
+            value="google_ai_studio",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color=ACCENT_BLUE_HOVER,
+        )
+        rb_rev_aistudio.pack(side="left")
+
+        # Dòng 2: Viết content
+        row2 = ctk.CTkFrame(engines_frame, fg_color="transparent")
+        row2.pack(fill="x", padx=10, pady=(3, 6))
+
+        ctk.CTkLabel(
+            row2,
+            text="2. Viết content:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+            width=110,
+            anchor="w",
+        ).pack(side="left")
+
+        rb_content_chatgpt = ctk.CTkRadioButton(
+            row2,
+            text="ChatGPT Web",
+            variable=self._write_content_engine_var,
+            value="chatgpt_web",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_chatgpt.pack(side="left", padx=(0, 15))
+
+        rb_content_gemini = ctk.CTkRadioButton(
+            row2,
+            text="Gemini Web",
+            variable=self._write_content_engine_var,
+            value="gemini_web",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_gemini.pack(side="left")
 
         # Gemini Web Session Bar
         self._web_session_card = ctk.CTkFrame(ai_card, fg_color="transparent")
@@ -1238,6 +1302,12 @@ function doPost(e) {
             
             threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_ai_engine_changed(self) -> None:
+        """Callback when AI Engine selection changes."""
+        rev_engine = self._review_video_engine_var.get()
+        write_engine = self._write_content_engine_var.get()
+        _enqueue_log(f"🤖 Đã chọn AI Engine -> Review: {rev_engine} | Content: {write_engine}")
+
     def _on_voice_changed(self, choice: str) -> None:
         if "ElevenLabs" in choice:
             key = self._eleven_key_var.get().strip() or os.getenv("ELEVENLABS_API_KEY", "")
@@ -1438,6 +1508,7 @@ function doPost(e) {
                 sample_style=sample_style_key,
                 custom_sample_text=self._custom_sample_text,
                 quality_threshold=0.70,
+                write_content_engine=self._write_content_engine_var.get(),
             )
 
             # Instantiate TTS Provider

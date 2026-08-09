@@ -151,14 +151,14 @@ class GoogleSheetExporter:
         webhook_status = "not_configured"
         webhook_target = webhook_url or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
         if webhook_target and webhook_target.startswith("http"):
-            if "/home/projects/" in webhook_target or "/edit" in webhook_target or not ("/macros/s/" in webhook_target or webhook_target.endswith("/exec")):
+            if "/macros/library/" in webhook_target or "/edit" in webhook_target:
                 _logger.warning("⚠️ LỖI WEBHOOK URL: Bạn đang nhập link chỉnh sửa Apps Script ({})! Vui lòng bấm nút 'Triển khai' (Deploy) ➔ Chọn 'Ứng dụng web' và lấy link kết thúc bằng '/exec'.", webhook_target)
                 webhook_status = "invalid_url_pasted_editor_link"
             else:
                 try:
                     _logger.info("Pushing batch clip data to Google Sheet Webhook: {}", webhook_target)
-                    res = requests.post(webhook_target, json=payload, timeout=30)
-                    if res.status_code == 200:
+                    res = requests.post(webhook_target, json=payload, timeout=30, allow_redirects=True)
+                    if res.status_code == 200 or res.status_code == 302:
                         webhook_status = "success"
                         _logger.info("Successfully synced {} rows to Google Sheet via Webhook!", len(sheet_rows))
                     else:

@@ -297,8 +297,23 @@ class BrowserManager:
                         sdata = json.load(f)
                     cookies_list = sdata.get("cookies", []) if isinstance(sdata, dict) else (sdata if isinstance(sdata, list) else [])
                     if cookies_list:
-                        BrowserManager._singleton_context.add_cookies(cookies_list)
-                        self._logger.info("Injected {} cookies into browser context", len(cookies_list))
+                        # Clean cookies so Playwright add_cookies won't reject non-standard keys
+                        valid_keys = {"name", "value", "url", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
+                        clean_cookies = []
+                        for c in cookies_list:
+                            if isinstance(c, dict) and "name" in c and "value" in c:
+                                cleaned = {k: v for k, v in c.items() if k in valid_keys and v is not None}
+                                clean_cookies.append(cleaned)
+                        
+                        # Add cookies in batches or individually to prevent 1 bad cookie from breaking all
+                        success_cnt = 0
+                        for ck in clean_cookies:
+                            try:
+                                BrowserManager._singleton_context.add_cookies([ck])
+                                success_cnt += 1
+                            except Exception:
+                                pass
+                        self._logger.info("Injected {}/{} valid cookies into browser context", success_cnt, len(clean_cookies))
                 except Exception as exc_cookies:
                     self._logger.warning("Failed injecting session cookies: {}", exc_cookies)
 
@@ -740,8 +755,21 @@ class BrowserManager:
 
                 # If browser context is running, add cookies and reload page
                 if BrowserManager._singleton_context:
-                    BrowserManager._singleton_context.add_cookies(cookies_list)
-                    self._logger.info("Hot-reloaded {} cookies into active browser context", len(cookies_list))
+                    valid_keys = {"name", "value", "url", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
+                    clean_cookies = []
+                    for c in cookies_list:
+                        if isinstance(c, dict) and "name" in c and "value" in c:
+                            cleaned = {k: v for k, v in c.items() if k in valid_keys and v is not None}
+                            clean_cookies.append(cleaned)
+                    
+                    success_cnt = 0
+                    for ck in clean_cookies:
+                        try:
+                            BrowserManager._singleton_context.add_cookies([ck])
+                            success_cnt += 1
+                        except Exception:
+                            pass
+                    self._logger.info("Hot-reloaded {}/{} cookies into active browser context", success_cnt, len(clean_cookies))
 
                     if BrowserManager._singleton_page and not BrowserManager._singleton_page.is_closed():
                         try:
@@ -869,6 +897,126 @@ class BrowserManager:
 
             self._bring_chrome_to_front(page)
 
+            if stage_idx == 2:
+                # -------------------------------------------------------------
+                # STAGE 2: CHATGPT WEB WORKFLOW
+                # -------------------------------------------------------------
+                _notify("Tab 2 (ChatGPT Web: Đang mở trang...)", 0.10)
+                try:
+                    if "chatgpt.com" not in page.url.lower():
+                        page.goto("https://chatgpt.com", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(2.0)
+                except Exception as exc:
+                    self.save_dom_snapshot(page, f"ChatGPT navigation failure: {exc}", job_id)
+                    raise GeminiWebNavigationError(f"Failed to load ChatGPT Web: {exc}") from exc
+
+                # Locate ChatGPT Chat Input
+                input_box, input_sel = self._find_element_with_fallback(
+                    page,
+                    CHATGPT_INPUT_SELECTORS,
+                    description="ChatGPT Input",
+                    target_type="input",
+                    timeout_per_selector_ms=1200,
+                    max_retries=4,
+                )
+
+                # Check if ChatGPT shows Log In / Sign Up buttons indicating session expired
+                login_btn = page.locator("button[data-testid='login-button'], a[href*='login'], button:has-text('Log in')")
+                if login_btn.count() > 0 and login_btn.first.is_visible():
+                    self.save_dom_snapshot(page, "ChatGPT session expired / login required", job_id)
+                    raise GeminiWebAuthError("Phiên đăng nhập ChatGPT (Tab 2) đã hết hạn hoặc chưa đăng nhập. Vui lòng dán Cookie ChatGPT mới!")
+
+                if not input_box:
+                    snapshot_dir = self.save_dom_snapshot(page, "ChatGPT input not found", job_id)
+                    raise GeminiWebDOMError(f"Không tìm thấy ô nhập câu hỏi ChatGPT. Hướng dẫn: Bấm nút 'Cookie ChatGPT' để dán lại cookie mới. (Snapshot: {snapshot_dir})")
+
+                # Baseline count of assistant response elements in ChatGPT
+                baseline_count = page.locator("div[data-message-author-role='assistant']").count()
+
+                # Type prompt into ChatGPT
+                _notify("Tab 2 (ChatGPT Web: Đang nhập prompt...)", 0.40)
+                try:
+                    input_box.click()
+                    time.sleep(0.3)
+                    page.keyboard.insert_text(prompt)
+                    time.sleep(0.8)
+                except Exception as exc:
+                    self.save_dom_snapshot(page, f"Failed typing prompt to ChatGPT: {exc}", job_id)
+                    raise GeminiWebDOMError(f"Failed entering text into ChatGPT input: {exc}") from exc
+
+                # Click Send
+                send_btn, send_sel = self._find_element_with_fallback(
+                    page,
+                    CHATGPT_SEND_SELECTORS,
+                    description="ChatGPT Send Button",
+                    target_type="send_button",
+                    timeout_per_selector_ms=800,
+                    max_retries=2,
+                    check_enabled=True,
+                )
+                if send_btn is not None:
+                    try:
+                        send_btn.click()
+                    except Exception:
+                        page.keyboard.press("Enter")
+                else:
+                    page.keyboard.press("Enter")
+
+                # Wait for ChatGPT response
+                _notify("Tab 2 (ChatGPT Web: Đang chờ phản hồi...)", 0.65)
+                time.sleep(3.0)
+
+                max_wait_start = time.time()
+                target_response = None
+
+                while time.time() - max_wait_start < 45.0:
+                    loc = page.locator("div[data-message-author-role='assistant']")
+                    if loc.count() > baseline_count:
+                        target_response = loc.last
+                        break
+                    time.sleep(1.0)
+
+                if target_response is None:
+                    loc = page.locator("div[data-message-author-role='assistant']")
+                    if loc.count() > 0:
+                        target_response = loc.last
+                    else:
+                        snapshot_dir = self.save_dom_snapshot(page, "ChatGPT response timeout", job_id)
+                        raise GeminiWebTimeoutError(f"Timed out waiting for ChatGPT response. Snapshot saved to: {snapshot_dir}")
+
+                # Stream stabilization for ChatGPT
+                _notify("Tab 2 (ChatGPT Web: Đang nhận kết quả...)", 0.85)
+                last_text = ""
+                stable_count = 0
+                gen_start = time.time()
+
+                while time.time() - gen_start < 120.0:
+                    try:
+                        current_text = target_response.inner_text().strip()
+                    except Exception:
+                        current_text = ""
+
+                    if current_text and current_text == last_text:
+                        stable_count += 1
+                        if stable_count >= 2:
+                            break
+                    else:
+                        stable_count = 0
+                        last_text = current_text
+
+                    time.sleep(0.8)
+
+                elapsed = time.time() - start_time
+                self.save_session()
+                return GeminiWebResponse(
+                    text=last_text,
+                    processing_time=elapsed,
+                    model_name="chatgpt-web-playwright",
+                )
+
+            # -------------------------------------------------------------
+            # STAGE 1: GEMINI WEB WORKFLOW
+            # -------------------------------------------------------------
             if "gemini.google.com" not in page.url.lower():
                 try:
                     _notify(f"Tab {stage_idx} (Đang truy cập Gemini Web)", 0.10)

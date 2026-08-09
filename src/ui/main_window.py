@@ -459,7 +459,7 @@ class MainWindow(ctk.CTk):
 
         self._btn_test_gemini = ctk.CTkButton(
             btn_action_row,
-            text="⚡ TestKết Nối",
+            text="⚡ Test Kết Nối (Tab 1 & Tab 2)",
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             font=ctk.CTkFont(size=11, weight="bold"),
@@ -467,19 +467,7 @@ class MainWindow(ctk.CTk):
             corner_radius=6,
             command=self._on_test_gemini,
         )
-        self._btn_test_gemini.pack(side="left", padx=(0, 4), expand=True, fill="x")
-
-        self._btn_clear_session = ctk.CTkButton(
-            btn_action_row,
-            text="🗑 Xóa Session",
-            fg_color=ACCENT_SLATE,
-            hover_color=ACCENT_SLATE_HOVER,
-            font=ctk.CTkFont(size=11),
-            height=26,
-            corner_radius=6,
-            command=self._on_clear_session,
-        )
-        self._btn_clear_session.pack(side="left", expand=True, fill="x")
+        self._btn_test_gemini.pack(side="left", expand=True, fill="x")
 
         # -------------------------------------------------------------
         # Section 2: Custom Prompt Directives (Optional)
@@ -641,7 +629,7 @@ class MainWindow(ctk.CTk):
         self._sheet_webhook_entry = ctk.CTkEntry(
             sheet_url_row,
             textvariable=self._sheet_webhook_var,
-            placeholder_text="https://script.google.com/macros/s/.../exec (Tùy chọn)",
+            placeholder_text="https://script.google.com/macros/s/.../exec",
             fg_color=BG_INPUT,
             border_color=BORDER_INPUT,
             height=24,
@@ -945,16 +933,31 @@ function doPost(e) {
     # ------------------------------------------------------------------
 
     def _refresh_gemini_status(self) -> None:
-        status = self._gemini_web_provider.get_session_status()
-        if status == SessionStatus.LOGGED_IN:
-            self._lbl_session_status.configure(text="Đã đăng nhập (Ready ✓)", text_color=ACCENT_GREEN)
-            self._lbl_hdr_status.configure(text="● Gemini Web Ready", text_color=ACCENT_GREEN)
-        elif status == SessionStatus.EXPIRED:
-            self._lbl_session_status.configure(text="Hết hạn phiên (Cần đăng nhập lại)", text_color="#f59e0b")
-            self._lbl_hdr_status.configure(text="● Session Hết hạn", text_color="#f59e0b")
+        sm = self._gemini_web_provider.session_manager
+        has_gemini = sm.has_session_file()
+        has_chatgpt = sm.has_chatgpt_session()
+
+        status_parts = []
+        if has_gemini:
+            status_parts.append("Gemini: Ready ✓")
         else:
-            self._lbl_session_status.configure(text="Chưa đăng nhập", text_color=ACCENT_RED)
-            self._lbl_hdr_status.configure(text="● Chưa đăng nhập", text_color=ACCENT_RED)
+            status_parts.append("Gemini: Chưa dán ❌")
+
+        if has_chatgpt:
+            status_parts.append("ChatGPT: Ready ✓")
+        else:
+            status_parts.append("ChatGPT: Chưa dán ❌")
+
+        full_status = " | ".join(status_parts)
+        if has_gemini and has_chatgpt:
+            self._lbl_session_status.configure(text=full_status, text_color=ACCENT_GREEN)
+            self._lbl_hdr_status.configure(text="● 2-Tab Ready (Gemini + ChatGPT)", text_color=ACCENT_GREEN)
+        elif has_gemini or has_chatgpt:
+            self._lbl_session_status.configure(text=full_status, text_color="#f59e0b")
+            self._lbl_hdr_status.configure(text="● Đã dán 1/2 Session", text_color="#f59e0b")
+        else:
+            self._lbl_session_status.configure(text=full_status, text_color=ACCENT_RED)
+            self._lbl_hdr_status.configure(text="● Chưa dán Cookie", text_color=ACCENT_RED)
 
     def _on_import_cookie(self) -> None:
         """Show modal dialog for pasting Gemini cookies."""
@@ -1084,6 +1087,7 @@ function doPost(e) {
                 count = mgr.import_cookies_from_raw_string(raw_text, target_domain=".chatgpt.com")
                 if count > 0:
                     self._gemini_web_provider.browser_manager.reload_cookies()
+                    self._refresh_gemini_status()
                     self._append_log(f"✅ Đã import thành công {count} cookies ChatGPT & tự động nạp vào Tab 2 trình duyệt!")
                     messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies ChatGPT thành công!\nBây giờ Tab 2 sẽ tự động chạy bằng ChatGPT Web.", parent=dialog)
                     dialog.destroy()
@@ -1122,30 +1126,42 @@ function doPost(e) {
             messagebox.showinfo("Thông báo", "Đã xóa session thành công.")
 
     def _on_test_gemini(self, auto: bool = False) -> None:
-        self._append_log("⚡ Đang gửi prompt thử nghiệm tới Gemini Web...")
+        self._append_log("⚡ Đang kiểm tra kết nối Tab 1 (Gemini Web) và Tab 2 (ChatGPT Web)...")
         self._btn_test_gemini.configure(state="disabled")
 
         def _test_task():
             try:
                 bm = self._gemini_web_provider.browser_manager
-                resp = bm.send_prompt("Xin chào Gemini! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.")
+                # Test Tab 1 (Gemini)
+                self._append_log("1️⃣ [Tab 1 - Gemini Web] Đang gửi tin nhắn thử nghiệm...")
+                resp1 = bm.send_prompt_to_stage(1, "Xin chào Gemini! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.")
+                self._append_log(f"✅ Tab 1 (Gemini Web) phản hồi: {resp1.text}")
+
+                # Test Tab 2 (ChatGPT)
+                self._append_log("2️⃣ [Tab 2 - ChatGPT Web] Đang gửi tin nhắn thử nghiệm...")
+                resp2 = bm.send_prompt_to_stage(2, "Xin chào ChatGPT! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.")
+                self._append_log(f"✅ Tab 2 (ChatGPT Web) phản hồi: {resp2.text}")
+
                 def _done():
                     self._btn_test_gemini.configure(state="normal")
                     self._refresh_gemini_status()
-                    self._append_log(f"✅ Phản hồi từ Gemini: {resp.text}")
                     if not auto:
-                        messagebox.showinfo("Kết nối thành công", f"Gemini Web phản hồi trong {resp.processing_time:.2f}s:\n\n{resp.text}")
+                        messagebox.showinfo(
+                            "Kết nối thành công ✓",
+                            f"Cả 2 Tab đều kết nối thành công!\n\n"
+                            f"🔹 Tab 1 (Gemini Web): {resp1.text}\n\n"
+                            f"🟢 Tab 2 (ChatGPT Web): {resp2.text}"
+                        )
                 self.after(0, _done)
             except Exception as exc:
                 err_msg = str(exc)
                 def _err():
                     self._btn_test_gemini.configure(state="normal")
                     self._refresh_gemini_status()
-                    self._append_log(f"❌ Test Gemini thất bại: {err_msg}")
+                    self._append_log(f"❌ Test kết nối thất bại: {err_msg}")
                     if not auto:
-                        messagebox.showerror("Lỗi kết nối", f"Không thể gửi prompt tới Gemini Web:\n{err_msg}")
+                        messagebox.showerror("Lỗi kết nối", f"Kiểm tra kết nối thất bại:\n{err_msg}")
                 self.after(0, _err)
-            # NOTE: Do NOT close browser here - keep Chrome alive for pipeline reuse!
 
         threading.Thread(target=_test_task, daemon=True).start()
 

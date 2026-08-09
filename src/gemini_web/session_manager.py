@@ -90,9 +90,11 @@ class SessionManager:
 
                 for c in raw_cookies:
                     if isinstance(c, dict) and "name" in c and "value" in c:
-                        domain = c.get("domain") or target_domain
-                        if not domain.startswith("."):
-                            domain = "." + domain.lstrip(".")
+                        orig_domain = c.get("domain") or ""
+                        if orig_domain:
+                            domain = orig_domain if orig_domain.startswith(".") else "." + orig_domain
+                        else:
+                            domain = target_domain
                         cookie_obj = {
                             "name": str(c["name"]).strip(),
                             "value": str(c["value"]).strip(),
@@ -101,8 +103,15 @@ class SessionManager:
                             "secure": bool(c.get("secure", True)),
                             "httpOnly": bool(c.get("httpOnly", False)),
                         }
-                        if "sameSite" in c and c["sameSite"] in ["Strict", "Lax", "None"]:
-                            cookie_obj["sameSite"] = c["sameSite"]
+                        # Playwright expects sameSite to be Strict, Lax, or None (case-sensitive or lowercase depending on version)
+                        raw_same_site = str(c.get("sameSite", "")).lower()
+                        if raw_same_site == "strict":
+                            cookie_obj["sameSite"] = "Strict"
+                        elif raw_same_site == "lax":
+                            cookie_obj["sameSite"] = "Lax"
+                        elif raw_same_site in ["none", "no_restriction"]:
+                            cookie_obj["sameSite"] = "None"
+
                         if "expirationDate" in c or "expires" in c:
                             exp = c.get("expirationDate") or c.get("expires")
                             if exp and float(exp) > 0:

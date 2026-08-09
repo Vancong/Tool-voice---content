@@ -48,6 +48,20 @@ class SessionManager:
         except Exception:
             return False
 
+    def has_chatgpt_session(self) -> bool:
+        """Check if session state file exists and has valid ChatGPT authentication cookies."""
+        if not self._session_path.exists():
+            return False
+        try:
+            with open(self._session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                cookies = data.get("cookies", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                chatgpt_domains = {"chatgpt.com", ".chatgpt.com", "openai.com", ".openai.com"}
+                chatgpt_cookies = [c for c in cookies if isinstance(c, dict) and c.get("domain", "").lower() in chatgpt_domains]
+                return len(chatgpt_cookies) > 0
+        except Exception:
+            return False
+
     def get_status(self) -> SessionStatus:
         """Get high-level status of session."""
         if self.has_session_file():

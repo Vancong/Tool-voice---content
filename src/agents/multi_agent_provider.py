@@ -86,23 +86,28 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if not self._browser_mgr:
             raise ReviewError("Browser Manager chưa được khởi tạo.")
 
-        # ── Pre-flight check: Verify Gemini Web Authentication ──
+        # ── Pre-flight check: Verify Gemini Web & ChatGPT Web Authentication ──
         if progress_cb:
-            progress_cb("Kiểm tra kết nối và đăng nhập Gemini Web...", 0.02)
-        _logger.info("Verifying Gemini Web login status...")
-        try:
-            status = self._browser_mgr.check_is_logged_in()
-            if status != SessionStatus.LOGGED_IN:
-                if not self._browser_mgr._session_mgr.session_path.exists():
-                    raise ReviewError(
-                        "⚠️ Chưa đăng nhập Google trên Gemini Web.\n"
-                        "Gemini Web yêu cầu đăng nhập tài khoản Google để có thể tải lên video.\n"
-                        "Vui lòng bấm '🍪 Nhập Cookie' trên giao diện để nạp cookie mới!"
-                    )
-        except ReviewError:
-            raise
-        except Exception as exc_chk:
-            _logger.warning("Pre-flight auth check encountered error: {}", exc_chk)
+            progress_cb("Kiểm tra cookie đăng nhập Gemini Web & ChatGPT Web...", 0.02)
+        _logger.info("Verifying Gemini Web and ChatGPT Web cookie status...")
+
+        session_mgr = self._browser_mgr._session_mgr
+
+        # 1. Check Gemini Session (Tab 1)
+        if not session_mgr.has_session_file():
+            raise ReviewError(
+                "⚠️ Chưa có Cookie Gemini Web (Tab 1)!\n"
+                "Tab 1 cần Cookie Gemini để phân tích video.\n"
+                "Vui lòng bấm '🍪 Cookie Gemini' trên giao diện để nạp cookie!"
+            )
+
+        # 2. Check ChatGPT Session (Tab 2)
+        if not session_mgr.has_chatgpt_session():
+            raise ReviewError(
+                "⚠️ Chưa có Cookie ChatGPT Web (Tab 2)!\n"
+                "Tab 2 cần Cookie ChatGPT để biên soạn kịch bản content.\n"
+                "Vui lòng bấm '🤖 Cookie ChatGPT' trên giao diện để nạp cookie!"
+            )
 
         p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
         p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")

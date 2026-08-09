@@ -787,6 +787,14 @@ class BrowserManager:
             page = self._ensure_browser(headless=False)
             page.goto(self._config.base_url, wait_until="domcontentloaded", timeout=15000)
             time.sleep(2.5)
+
+            if self._is_page_authenticated_impl(page):
+                return SessionStatus.LOGGED_IN
+            return SessionStatus.NOT_LOGGED_IN
+        except Exception as exc:
+            self._logger.warning("Error checking login status: {}", exc)
+            return SessionStatus.NOT_LOGGED_IN
+
     def get_stage_page(self, stage_idx: int) -> Page:
         """Get or create persistent tab for Stage 1 (Tab 1 - Gemini) or Stage 2 (Tab 2 - ChatGPT Web)."""
         return self._on_browser_thread(self._get_stage_page_impl, stage_idx)

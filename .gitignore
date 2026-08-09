@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Build & Dist
+build/
+dist/
+*.spec
+!AI-Movie-Review-Studio.spec
+
+# Environment & Credentials
+.env
+*.session.json
+*.cookie.json
+logs/
+data/
+scratch/
+.pytest_cache/

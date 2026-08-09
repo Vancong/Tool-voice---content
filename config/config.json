@@ -1,0 +1,44 @@
+{
+  "video": {
+    "supported_formats": [".mp4", ".mkv", ".avi", ".mov"],
+    "default_fps": 30,
+    "thumbnail_width": 320,
+    "thumbnail_height": 180
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "channels": 2,
+    "output_filename": "audio.wav"
+  },
+  "stt": {
+    "provider": "faster_whisper",
+    "language": null
+  },
+  "scene_detection": {
+    "threshold": 30.0,
+    "min_scene_len_sec": 2.0
+  },
+  "frame_extraction": {
+    "max_frames_per_scene": 5,
+    "resize_width": 720,
+    "resize_height": 480
+  },
+  "vision": {
+    "provider": "gemini",
+    "max_batch_size": 10,
+    "image_quality": 85
+  },
+  "logging": {
+    "log_file": "logs/movie_review.log",
+    "log_level": "INFO"
+  },
+  "tts": {
+    "provider": "edge_tts",
+    "voice_id": "vi-VN-NamMinhNeural",
+    "rate": "+0%",
+    "pitch": "+0Hz"
+  },
+  "thread_pool": {
+    "max_workers": 8
+  }
+}

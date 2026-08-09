@@ -54,13 +54,14 @@ class SessionManager:
             return SessionStatus.LOGGED_IN
         return SessionStatus.NOT_LOGGED_IN
 
-    def import_cookies_from_raw_string(self, raw_input: str) -> int:
-        """Parse JSON or HTTP Header Cookie string and save to session_file in Playwright format."""
+    def import_cookies_from_raw_string(self, raw_input: str, target_domain: str = ".google.com", target_file: Optional[Path] = None) -> int:
+        """Parse JSON or HTTP Header Cookie string and save to target_file in Playwright format."""
         raw_input = raw_input.strip()
         if not raw_input:
             return 0
 
         cookies_list = []
+        out_path = target_file or self._session_path
 
         # 1. Try parsing as JSON (Cookie-Editor / EditThisCookie / Playwright format)
         if raw_input.startswith("[") or raw_input.startswith("{"):
@@ -75,7 +76,7 @@ class SessionManager:
 
                 for c in raw_cookies:
                     if isinstance(c, dict) and "name" in c and "value" in c:
-                        domain = c.get("domain") or ".google.com"
+                        domain = c.get("domain") or target_domain
                         if not domain.startswith("."):
                             domain = "." + domain.lstrip(".")
                         cookie_obj = {
@@ -108,17 +109,33 @@ class SessionManager:
                         cookies_list.append({
                             "name": name,
                             "value": val,
-                            "domain": ".google.com",
+                            "domain": target_domain,
                             "path": "/",
                             "secure": True,
                             "httpOnly": False,
                         })
 
         if cookies_list:
-            storage_data = {"cookies": cookies_list, "origins": []}
-            with open(self._session_path, "w", encoding="utf-8") as f:
+            # If out_path exists and has existing cookies, merge them
+            existing_cookies = []
+            if out_path.exists():
+                try:
+                    with open(out_path, "r", encoding="utf-8") as f:
+                        old_data = json.load(f)
+                        existing_cookies = old_data.get("cookies", []) if isinstance(old_data, dict) else []
+                except Exception:
+                    pass
+
+            # Merge: new cookies overwrite old ones with same name & domain
+            cookie_dict = {(c.get("domain", ""), c.get("name", "")): c for c in existing_cookies}
+            for c in cookies_list:
+                cookie_dict[(c.get("domain", ""), c.get("name", ""))] = c
+
+            merged_cookies = list(cookie_dict.values())
+            storage_data = {"cookies": merged_cookies, "origins": []}
+            with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(storage_data, f, indent=2)
-            self._logger.info("Imported {} cookies into {}", len(cookies_list), self._session_path)
+            self._logger.info("Imported {} cookies into {}", len(merged_cookies), out_path)
             return len(cookies_list)
 
         return 0

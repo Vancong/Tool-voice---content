@@ -429,13 +429,13 @@ class MainWindow(ctk.CTk):
         )
         self._lbl_session_status.pack(side="left", padx=8)
 
-        # 3 Actions (1 row)
+        # 4 Actions (1 row)
         btn_action_row = ctk.CTkFrame(self._web_session_card, fg_color="transparent")
         btn_action_row.pack(fill="x", pady=(0, 2))
 
         self._btn_import_cookie = ctk.CTkButton(
             btn_action_row,
-            text="🍪 Nhập Cookie",
+            text="🍪 Cookie Gemini",
             fg_color="#8b5cf6",
             hover_color="#7c3aed",
             font=ctk.CTkFont(size=11, weight="bold"),
@@ -445,9 +445,21 @@ class MainWindow(ctk.CTk):
         )
         self._btn_import_cookie.pack(side="left", padx=(0, 4), expand=True, fill="x")
 
+        self._btn_import_chatgpt_cookie = ctk.CTkButton(
+            btn_action_row,
+            text="🤖 Cookie ChatGPT",
+            fg_color="#10a37f",
+            hover_color="#0e8c6d",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            corner_radius=6,
+            command=self._on_import_chatgpt_cookie,
+        )
+        self._btn_import_chatgpt_cookie.pack(side="left", padx=(0, 4), expand=True, fill="x")
+
         self._btn_test_gemini = ctk.CTkButton(
             btn_action_row,
-            text="⚡ Test Kết Nối",
+            text="⚡ TestKết Nối",
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             font=ctk.CTkFont(size=11, weight="bold"),
@@ -1009,6 +1021,85 @@ function doPost(e) {
             font=ctk.CTkFont(size=12, weight="bold"),
             height=32,
             command=_do_save,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Hủy",
+            fg_color=ACCENT_SLATE,
+            hover_color=ACCENT_SLATE_HOVER,
+            font=ctk.CTkFont(size=12),
+            height=32,
+            command=dialog.destroy,
+        ).pack(side="right")
+
+    def _on_import_chatgpt_cookie(self) -> None:
+        """Show modal dialog for pasting ChatGPT Web cookies."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("🤖 Import Cookie ChatGPT Web (Tab 2)")
+        dialog.geometry("620x440")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.focus_force()
+
+        ctk.CTkLabel(
+            dialog,
+            text="🤖 Import Cookie ChatGPT Web (Tab 2)",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#10a37f",
+        ).pack(anchor="w", padx=16, pady=(14, 4))
+
+        ctk.CTkLabel(
+            dialog,
+            text="Dán Cookie ChatGPT của bạn vào ô bên dưới (Hỗ trợ dạng JSON từ Cookie-Editor/EditThisCookie hoặc dạng text Header):",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            wraplength=580,
+            justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        txt_cookie = ctk.CTkTextbox(
+            dialog,
+            height=240,
+            font=ctk.CTkFont(size=11),
+            fg_color=BG_INPUT,
+            border_width=1,
+            border_color=BORDER_INPUT,
+            corner_radius=8,
+        )
+        txt_cookie.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+
+        def _do_save_chatgpt():
+            raw_text = txt_cookie.get("1.0", "end").strip()
+            if not raw_text:
+                messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie ChatGPT trước khi lưu!", parent=dialog)
+                return
+
+            try:
+                # Import into session manager targeting .chatgpt.com
+                mgr = self._gemini_web_provider.session_manager
+                count = mgr.import_cookies_from_raw_string(raw_text, target_domain=".chatgpt.com")
+                if count > 0:
+                    self._gemini_web_provider.browser_manager.reload_cookies()
+                    self._append_log(f"✅ Đã import thành công {count} cookies ChatGPT & tự động nạp vào Tab 2 trình duyệt!")
+                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies ChatGPT thành công!\nBây giờ Tab 2 sẽ tự động chạy bằng ChatGPT Web.", parent=dialog)
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Lỗi Cookie", "Không phân tích được chuỗi Cookie ChatGPT! Vui lòng kiểm tra lại định dạng JSON.", parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Lỗi", f"Lỗi khi import cookie ChatGPT:\n{exc}", parent=dialog)
+
+        ctk.CTkButton(
+            btn_row,
+            text="✅ Lưu Cookie ChatGPT",
+            fg_color="#10a37f",
+            hover_color="#0e8c6d",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=32,
+            command=_do_save_chatgpt,
         ).pack(side="right", padx=(8, 0))
 
         ctk.CTkButton(

@@ -137,10 +137,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             _logger.error("Tab 1 setup failed: {}", exc)
             raise ReviewError(f"Lỗi khởi động Tab 1: {exc}") from exc
 
-        # ── Tab 2: Setup Writer Role ──
+        # ── Tab 2: Setup Writer Role (ChatGPT Web) ──
         if progress_cb:
-            progress_cb("Khởi động Tab 2 (Viết content)...", 0.08)
-        _logger.info("Setting up Tab 2 with JOB 2 system prompt...")
+            progress_cb("Khởi động Tab 2 (ChatGPT Web: Viết content)...", 0.08)
+        _logger.info("Setting up Tab 2 (ChatGPT Web) with JOB 2 system prompt...")
         try:
             self._browser_mgr.send_prompt_to_stage(
                 stage_idx=2,
@@ -149,10 +149,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 job_id="setup_tab2",
                 progress_callback=progress_cb,
             )
-            _logger.info("Tab 2 setup complete.")
+            _logger.info("Tab 2 (ChatGPT Web) setup complete.")
         except Exception as exc:
-            _logger.error("Tab 2 setup failed: {}", exc)
-            raise ReviewError(f"Lỗi khởi động Tab 2: {exc}") from exc
+            _logger.error("Tab 2 (ChatGPT Web) setup failed: {}", exc)
+            raise ReviewError(f"Lỗi khởi động Tab 2 (ChatGPT Web): {exc}") from exc
 
         self._tabs_initialized = True
 

@@ -20,4 +20,5 @@ dist/
 logs/
 data/
 scratch/
+test_whisper/
 .pytest_cache/

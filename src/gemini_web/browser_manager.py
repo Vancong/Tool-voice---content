@@ -115,6 +115,43 @@ NEW_CHAT_SELECTORS = [
     "button:has(svg[data-icon='plus'])",
 ]
 
+# Selectors for ChatGPT Web UI
+CHATGPT_INPUT_SELECTORS = [
+    "#prompt-textarea",
+    "div[contenteditable='true'][id='prompt-textarea']",
+    "div[contenteditable='true']",
+    "textarea#prompt-textarea",
+    "textarea[data-id]",
+    "textarea",
+]
+
+CHATGPT_SEND_SELECTORS = [
+    "button[data-testid='send-button']",
+    "button[aria-label*='Send' i]",
+    "button[aria-label*='Gửi' i]",
+    "button:has(svg[data-icon='arrow-up'])",
+    "button.mb-1",
+]
+
+CHATGPT_STOP_SELECTORS = [
+    "button[data-testid='stop-button']",
+    "button[aria-label*='Stop' i]",
+]
+
+CHATGPT_RESPONSE_SELECTORS = [
+    "div[data-message-author-role='assistant'] .markdown",
+    "div[data-message-author-role='assistant']",
+    "div.article-content",
+    "div.markdown",
+]
+
+CHATGPT_NEW_CHAT_SELECTORS = [
+    "a[href='/']",
+    "button:has-text('New chat')",
+    "a:has-text('New chat')",
+    "button[aria-label*='New chat' i]",
+]
+
 
 class BrowserManager:
     """Enterprise-grade manager for persistent Playwright browser automation."""
@@ -750,16 +787,8 @@ class BrowserManager:
             page = self._ensure_browser(headless=False)
             page.goto(self._config.base_url, wait_until="domcontentloaded", timeout=15000)
             time.sleep(2.5)
-
-            if self._is_page_authenticated_impl(page):
-                return SessionStatus.LOGGED_IN
-            return SessionStatus.NOT_LOGGED_IN
-        except Exception as exc:
-            self._logger.warning("Error checking login status: {}", exc)
-            return SessionStatus.NOT_LOGGED_IN
-
     def get_stage_page(self, stage_idx: int) -> Page:
-        """Get or create persistent tab for Stage 1 (Tab 1) or Stage 2 (Tab 2)."""
+        """Get or create persistent tab for Stage 1 (Tab 1 - Gemini) or Stage 2 (Tab 2 - ChatGPT Web)."""
         return self._on_browser_thread(self._get_stage_page_impl, stage_idx)
 
     def _get_stage_page_impl(self, stage_idx: int) -> Page:
@@ -771,13 +800,16 @@ class BrowserManager:
                 pages = ctx.pages
                 if stage_idx == 1:
                     page = pages[0] if len(pages) > 0 else ctx.new_page()
+                    target_url = self._config.base_url  # https://gemini.google.com
                 else:
                     page = pages[1] if len(pages) > 1 else ctx.new_page()
+                    target_url = "https://chatgpt.com"
 
                 try:
                     self._bring_chrome_to_front(page)
-                    if "gemini.google.com" not in page.url.lower():
-                        page.goto(self._config.base_url, wait_until="commit", timeout=10000)
+                    domain_check = "gemini.google.com" if stage_idx == 1 else "chatgpt.com"
+                    if domain_check not in page.url.lower():
+                        page.goto(target_url, wait_until="commit", timeout=12000)
                         time.sleep(1.5)
                 except Exception:
                     pass
@@ -796,6 +828,7 @@ class BrowserManager:
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
     ) -> GeminiWebResponse:
+        """Send prompt to Stage 1 (Gemini Web) or Stage 2 (ChatGPT Web)."""
         return self._on_browser_thread(
             self._send_prompt_to_stage_impl,
             stage_idx,

@@ -936,13 +936,25 @@ class BrowserManager:
                 # Type prompt into ChatGPT
                 _notify("Tab 2 (ChatGPT Web: Đang nhập prompt...)", 0.40)
                 try:
-                    input_box.click()
+                    try:
+                        input_box.focus()
+                    except Exception:
+                        pass
+                    try:
+                        input_box.click(timeout=3000)
+                    except Exception:
+                        input_box.click(force=True, timeout=2000)
                     time.sleep(0.3)
                     page.keyboard.insert_text(prompt)
                     time.sleep(0.8)
                 except Exception as exc:
-                    self.save_dom_snapshot(page, f"Failed typing prompt to ChatGPT: {exc}", job_id)
-                    raise GeminiWebDOMError(f"Failed entering text into ChatGPT input: {exc}") from exc
+                    # Fallback to direct fill if click/keyboard fails
+                    try:
+                        input_box.fill(prompt)
+                        time.sleep(0.8)
+                    except Exception as fill_exc:
+                        self.save_dom_snapshot(page, f"Failed typing prompt to ChatGPT: {exc}", job_id)
+                        raise GeminiWebDOMError(f"Failed entering text into ChatGPT input: {fill_exc}") from fill_exc
 
                 # Click Send
                 send_btn, send_sel = self._find_element_with_fallback(

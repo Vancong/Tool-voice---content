@@ -59,12 +59,14 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         sample_style: Optional[str] = None,
         custom_sample_text: Optional[str] = None,
         quality_threshold: float = 0.70,
+        review_video_engine: str = "gemini_web",
         write_content_engine: str = "chatgpt_web",
     ) -> None:
         self._browser_mgr = browser_mgr
         self._openai_provider = openai_provider
         self._sample_style = sample_style
         self._custom_sample_text = custom_sample_text
+        self._review_video_engine = review_video_engine
         self._write_content_engine = write_content_engine
         self._tabs_initialized = False  # Track whether Tab 1 & Tab 2 have been setup
 
@@ -88,17 +90,18 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if not self._browser_mgr:
             raise ReviewError("Browser Manager chưa được khởi tạo.")
 
+        tab1_label = "Google AI Studio" if self._review_video_engine == "google_ai_studio" else "Gemini Web"
         tab2_label = "ChatGPT Web" if self._write_content_engine == "chatgpt_web" else "Gemini Web"
 
         # ── Pre-flight check: Verify Authentication ──
         if progress_cb:
-            progress_cb(f"Kiểm tra cookie đăng nhập Gemini Web & {tab2_label}...", 0.02)
-        _logger.info("Verifying Gemini Web and {} cookie status...", tab2_label)
+            progress_cb(f"Kiểm tra phiên đăng nhập {tab1_label} & {tab2_label}...", 0.02)
+        _logger.info("Verifying {} and {} session status...", tab1_label, tab2_label)
 
         session_mgr = self._browser_mgr._session_mgr
 
-        # 1. Check Gemini Session (Tab 1)
-        if not session_mgr.has_session_file():
+        # 1. Check Gemini Session (Tab 1) if gemini_web selected
+        if self._review_video_engine == "gemini_web" and not session_mgr.has_session_file():
             raise ReviewError(
                 "⚠️ Chưa có Cookie Gemini Web (Tab 1)!\n"
                 "Tab 1 cần Cookie Gemini để phân tích video.\n"
@@ -131,8 +134,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         # ── Tab 1: Setup Observer Role ──
         if progress_cb:
-            progress_cb("Khởi động Tab 1 (Quan sát video)...", 0.05)
-        _logger.info("Setting up Tab 1 with JOB 1 system prompt...")
+            progress_cb(f"Khởi động Tab 1 ({tab1_label}: Quan sát video)...", 0.05)
+        _logger.info("Setting up Tab 1 ({}) with JOB 1 system prompt...", tab1_label)
         try:
             self._browser_mgr.send_prompt_to_stage(
                 stage_idx=1,
@@ -140,12 +143,13 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 media_path=None,
                 job_id="setup_tab1",
                 progress_callback=progress_cb,
+                review_video_engine=self._review_video_engine,
                 write_content_engine=self._write_content_engine,
             )
-            _logger.info("Tab 1 setup complete.")
+            _logger.info("Tab 1 ({}) setup complete.", tab1_label)
         except Exception as exc:
-            _logger.error("Tab 1 setup failed: {}", exc)
-            raise ReviewError(f"Lỗi khởi động Tab 1: {exc}") from exc
+            _logger.error("Tab 1 ({}) setup failed: {}", tab1_label, exc)
+            raise ReviewError(f"Lỗi khởi động Tab 1 ({tab1_label}): {exc}") from exc
 
         # ── Tab 2: Setup Writer Role ──
         if progress_cb:
@@ -158,6 +162,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 media_path=None,
                 job_id="setup_tab2",
                 progress_callback=progress_cb,
+                review_video_engine=self._review_video_engine,
                 write_content_engine=self._write_content_engine,
             )
             _logger.info("Tab 2 ({}) setup complete.", tab2_label)
@@ -189,8 +194,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         base_pct = clip_idx / total_clips
 
         # ── Tab 1: Send video, get description ──
+        tab1_label = "Google AI Studio" if self._review_video_engine == "google_ai_studio" else "Gemini Web"
         if progress_cb:
-            progress_cb(f"Clip {clip_num}/{total_clips} (Tab 1: Gửi video để phân tích)", base_pct + 0.01)
+            progress_cb(f"Clip {clip_num}/{total_clips} (Tab 1: Gửi video qua {tab1_label})", base_pct + 0.01)
 
         video_prompt = (
             f"[CLIP #{clip_num}/{total_clips}]\n"
@@ -203,13 +209,15 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         stage1_desc = ""
         try:
-            _logger.info("Tab 1: Sending video clip {}/{} → {}", clip_num, total_clips, clip_video_path)
+            _logger.info("Tab 1 ({}): Sending video clip {}/{} → {}", tab1_label, clip_num, total_clips, clip_video_path)
             resp1 = self._browser_mgr.send_prompt_to_stage(
                 stage_idx=1,
                 prompt=video_prompt,
                 media_path=clip_video_path,
                 job_id=f"{job_id}_clip{clip_idx}_tab1",
                 progress_callback=progress_cb,
+                review_video_engine=self._review_video_engine,
+                write_content_engine=self._write_content_engine,
             )
             stage1_desc = resp1.text.strip()
             # Strip any "Gemini đã nói" / "Gemini said" prefix
@@ -511,8 +519,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if self._browser_mgr:
             try:
                 session_mgr = self._browser_mgr._session_mgr
-                if not session_mgr.has_session_file():
-                    return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Chưa có Cookie Gemini Web (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
+                if self._review_video_engine in ("gemini_web", "google_ai_studio") and not session_mgr.has_session_file():
+                    return Result.Err(ReviewError("❌ Chưa có Cookie Google (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
                 if self._write_content_engine == "chatgpt_web" and not session_mgr.has_chatgpt_session():
                     return Result.Err(ReviewError("❌ [Lỗi ChatGPT Web] Chưa có Cookie ChatGPT Web (Tab 2). Vui lòng bấm '🤖 Cookie ChatGPT' để nạp cookie!"))
                 return Result.Ok(True)

@@ -152,6 +152,26 @@ CHATGPT_NEW_CHAT_SELECTORS = [
     "button[aria-label*='New chat' i]",
 ]
 
+AISTUDIO_INPUT_SELECTORS = [
+    "textarea",
+    "div[contenteditable='true']",
+    "textarea[placeholder*='prompt' i]",
+    "textarea[placeholder*='type' i]",
+    "textarea[placeholder*='Insert' i]",
+    ".mat-mdc-input-element",
+    "div[role='textbox']",
+]
+
+AISTUDIO_RUN_SELECTORS = [
+    "button:has-text('Run')",
+    "button[aria-label*='Run' i]",
+    "button:has(mat-icon[fonticon='play_arrow'])",
+    "button:has(svg[data-icon='play'])",
+    "button[aria-label*='Send' i]",
+    "button:has-text('Send')",
+    "button.run-button",
+]
+
 
 class BrowserManager:
     """Enterprise-grade manager for persistent Playwright browser automation."""
@@ -825,11 +845,21 @@ class BrowserManager:
             self._logger.warning("Error checking login status: {}", exc)
             return SessionStatus.NOT_LOGGED_IN
 
-    def get_stage_page(self, stage_idx: int, write_content_engine: str = "chatgpt_web") -> Page:
-        """Get or create persistent tab for Stage 1 (Gemini) or Stage 2 (ChatGPT / Gemini Web)."""
-        return self._on_browser_thread(self._get_stage_page_impl, stage_idx, write_content_engine)
+    def get_stage_page(
+        self,
+        stage_idx: int,
+        write_content_engine: str = "chatgpt_web",
+        review_video_engine: str = "gemini_web",
+    ) -> Page:
+        """Get or create persistent tab for Stage 1 (Gemini / Google AI Studio) or Stage 2 (ChatGPT / Gemini Web)."""
+        return self._on_browser_thread(self._get_stage_page_impl, stage_idx, write_content_engine, review_video_engine)
 
-    def _get_stage_page_impl(self, stage_idx: int, write_content_engine: str = "chatgpt_web") -> Page:
+    def _get_stage_page_impl(
+        self,
+        stage_idx: int,
+        write_content_engine: str = "chatgpt_web",
+        review_video_engine: str = "gemini_web",
+    ) -> Page:
         with BrowserManager._singleton_lock:
             first_page = self._ensure_browser(headless=False)
             ctx = BrowserManager._singleton_context
@@ -838,8 +868,12 @@ class BrowserManager:
                 pages = ctx.pages
                 if stage_idx == 1:
                     page = pages[0] if len(pages) > 0 else ctx.new_page()
-                    target_url = self._config.base_url  # https://gemini.google.com
-                    domain_check = "gemini.google.com"
+                    if review_video_engine == "google_ai_studio":
+                        target_url = "https://aistudio.google.com/app/prompts/new_chat?model=gemini-3.5-flash"
+                        domain_check = "aistudio.google.com"
+                    else:
+                        target_url = self._config.base_url  # https://gemini.google.com
+                        domain_check = "gemini.google.com"
                 else:
                     page = pages[1] if len(pages) > 1 else ctx.new_page()
                     if write_content_engine == "gemini_web":
@@ -852,7 +886,7 @@ class BrowserManager:
                 try:
                     self._bring_chrome_to_front(page)
                     if domain_check not in page.url.lower():
-                        page.goto(target_url, wait_until="commit", timeout=12000)
+                        page.goto(target_url, wait_until="commit", timeout=15000)
                         time.sleep(1.5)
                 except Exception:
                     pass
@@ -871,8 +905,9 @@ class BrowserManager:
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
         write_content_engine: str = "chatgpt_web",
+        review_video_engine: str = "gemini_web",
     ) -> GeminiWebResponse:
-        """Send prompt to Stage 1 (Gemini Web) or Stage 2 (ChatGPT Web / Gemini Web)."""
+        """Send prompt to Stage 1 (Gemini Web / AI Studio) or Stage 2 (ChatGPT Web / Gemini Web)."""
         return self._on_browser_thread(
             self._send_prompt_to_stage_impl,
             stage_idx,
@@ -881,6 +916,7 @@ class BrowserManager:
             job_id,
             progress_callback,
             write_content_engine,
+            review_video_engine,
         )
 
     def _send_prompt_to_stage_impl(
@@ -891,6 +927,7 @@ class BrowserManager:
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
         write_content_engine: str = "chatgpt_web",
+        review_video_engine: str = "gemini_web",
     ) -> GeminiWebResponse:
         """Internal implementation executing strictly on dedicated browser thread."""
         start_time = time.time()
@@ -903,7 +940,7 @@ class BrowserManager:
 
         with BrowserManager._job_queue_lock:
             _notify(f"Tab {stage_idx} (Đang mở trình duyệt)", 0.05)
-            page = self.get_stage_page(stage_idx, write_content_engine=write_content_engine)
+            page = self.get_stage_page(stage_idx, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
 
             self._bring_chrome_to_front(page)
 
@@ -1041,6 +1078,169 @@ class BrowserManager:
                     text=last_text,
                     processing_time=elapsed,
                     model_name="chatgpt-web-playwright",
+                )
+
+            # -------------------------------------------------------------
+            # STAGE 1: GOOGLE AI STUDIO WEB WORKFLOW
+            # -------------------------------------------------------------
+            if stage_idx == 1 and review_video_engine == "google_ai_studio":
+                _notify("Tab 1 (Google AI Studio: Đang mở trang...)", 0.10)
+                try:
+                    if "aistudio.google.com" not in page.url.lower():
+                        page.goto("https://aistudio.google.com/app/prompts/new_chat?model=gemini-3.5-flash", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(2.5)
+                except Exception as exc:
+                    self.save_dom_snapshot(page, f"Google AI Studio navigation failure: {exc}", job_id)
+                    raise GeminiWebNavigationError(f"Failed to load Google AI Studio Web: {exc}") from exc
+
+                # Auto select working model if preview/unsupported model is selected
+                try:
+                    for model_picker in [
+                        "button:has-text('Gemini 3')",
+                        "button:has-text('Preview')",
+                        "button:has-text('gemini-3')",
+                        ".model-selector-button",
+                        "mat-select",
+                    ]:
+                        m_btn = page.locator(model_picker).first
+                        if m_btn.is_visible(timeout=1000):
+                            m_btn.click(timeout=1000)
+                            time.sleep(0.8)
+                            for target_option in [
+                                "mat-option:has-text('3.5 Flash')",
+                                "mat-option:has-text('2.0 Flash')",
+                                "mat-option:has-text('1.5 Flash')",
+                                "div:has-text('Gemini 3.5 Flash')",
+                                "div:has-text('Gemini 2.0 Flash')",
+                            ]:
+                                opt = page.locator(target_option).first
+                                if opt.is_visible(timeout=1000):
+                                    opt.click(timeout=1000)
+                                    self._logger.info("[Tab 1] Switched AI Studio model via '{}'", target_option)
+                                    time.sleep(1.0)
+                                    break
+                            break
+                except Exception as exc_m:
+                    self._logger.debug("[Tab 1] Auto model selection attempt: {}", exc_m)
+
+                # Upload Video File if provided
+                if media_path and media_path.exists():
+                    _notify("Tab 1 (Google AI Studio: Đang đính kèm video...)", 0.20)
+                    self._logger.info("[Tab 1] Uploading video to AI Studio: {} ({:.1f} MB)", media_path.name, media_path.stat().st_size / (1024 * 1024))
+                    upload_ok = False
+                    media_path_str = str(media_path.resolve())
+
+                    try:
+                        file_inputs = page.locator("input[type='file']")
+                        if file_inputs.count() > 0:
+                            for f_idx in range(file_inputs.count()):
+                                try:
+                                    file_inputs.nth(f_idx).set_input_files(media_path_str, timeout=4000)
+                                    upload_ok = True
+                                    self._logger.info("[Tab 1] AI Studio video file input upload succeeded")
+                                    break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
+
+                    if not upload_ok:
+                        # Try Insert file button in Google AI Studio
+                        for insert_sel in [
+                            "button:has-text('Insert')",
+                            "button[aria-label*='Insert' i]",
+                            "button:has(mat-icon[fonticon='add'])",
+                            "button:has-text('+')",
+                        ]:
+                            try:
+                                btn = page.locator(insert_sel).first
+                                if btn.is_visible(timeout=1000):
+                                    btn.click()
+                                    time.sleep(0.5)
+                                    file_inputs = page.locator("input[type='file']")
+                                    if file_inputs.count() > 0:
+                                        file_inputs.first.set_input_files(media_path_str, timeout=4000)
+                                        upload_ok = True
+                                        self._logger.info("[Tab 1] AI Studio Insert button upload succeeded")
+                                        break
+                            except Exception:
+                                continue
+
+                    if upload_ok:
+                        time.sleep(5.0)  # Wait for AI Studio video processing
+
+                # Find AI Studio Input Box
+                input_box, input_sel = self._find_element_with_fallback(
+                    page,
+                    AISTUDIO_INPUT_SELECTORS,
+                    description="Google AI Studio Input",
+                    target_type="input",
+                    timeout_per_selector_ms=1200,
+                    max_retries=4,
+                )
+                if not input_box:
+                    snapshot_dir = self.save_dom_snapshot(page, "AI Studio input not found", job_id)
+                    raise GeminiWebDOMError(f"Không tìm thấy ô nhập câu hỏi trên Google AI Studio. (Snapshot: {snapshot_dir})")
+
+                _notify("Tab 1 (Google AI Studio: Đang nhập prompt...)", 0.40)
+                try:
+                    input_box.focus()
+                    input_box.click(timeout=1000)
+                except Exception:
+                    pass
+                try:
+                    page.keyboard.insert_text(prompt)
+                    time.sleep(0.3)
+                except Exception:
+                    input_box.fill(prompt)
+
+                # Click Run Button in AI Studio
+                run_sent = False
+                for r_sel in AISTUDIO_RUN_SELECTORS:
+                    try:
+                        r_btn = page.locator(r_sel).first
+                        if r_btn.is_visible(timeout=500) and r_btn.is_enabled():
+                            r_btn.click(timeout=1000)
+                            run_sent = True
+                            self._logger.info("[Tab 1] Clicked AI Studio Run button via '{}'", r_sel)
+                            break
+                    except Exception:
+                        continue
+
+                if not run_sent:
+                    page.keyboard.press("Control+Enter")
+                    self._logger.info("[Tab 1] Pressed Ctrl+Enter to run AI Studio prompt")
+
+                # Wait for response in AI Studio
+                _notify("Tab 1 (Google AI Studio: Đang chờ AI phân tích video...)", 0.65)
+                time.sleep(3.0)
+
+                gen_start = time.time()
+                last_text = ""
+                stable_count = 0
+
+                while time.time() - gen_start < 120.0:
+                    try:
+                        turns = page.locator("ms-chat-turn, div.turn-content, div.markdown")
+                        if turns.count() > 0:
+                            current_text = turns.last.inner_text().strip()
+                            if current_text and current_text == last_text:
+                                stable_count += 1
+                                if stable_count >= 2:
+                                    break
+                            else:
+                                stable_count = 0
+                                last_text = current_text
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+
+                elapsed = time.time() - start_time
+                self.save_session()
+                return GeminiWebResponse(
+                    text=last_text,
+                    processing_time=elapsed,
+                    model_name="google-ai-studio-web-playwright",
                 )
 
             # -------------------------------------------------------------

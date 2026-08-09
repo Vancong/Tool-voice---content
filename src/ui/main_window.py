@@ -425,16 +425,17 @@ class MainWindow(ctk.CTk):
         )
         rb_rev_gemini.pack(side="left", padx=(0, 15))
 
-        rb_rev_aistudio = ctk.CTkRadioButton(
-            row1,
-            text="Google AI Studio",
-            variable=self._review_video_engine_var,
-            value="google_ai_studio",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=ACCENT_BLUE,
-            hover_color=ACCENT_BLUE_HOVER,
-        )
-        rb_rev_aistudio.pack(side="left")
+        # Tạm thời ẩn Google AI Studio theo yêu cầu người dùng
+        # rb_rev_aistudio = ctk.CTkRadioButton(
+        #     row1,
+        #     text="Google AI Studio",
+        #     variable=self._review_video_engine_var,
+        #     value="google_ai_studio",
+        #     font=ctk.CTkFont(size=11, weight="bold"),
+        #     fg_color=ACCENT_BLUE,
+        #     hover_color=ACCENT_BLUE_HOVER,
+        # )
+        # rb_rev_aistudio.pack(side="left")
 
         # Dòng 2: Viết content
         row2 = ctk.CTkFrame(engines_frame, fg_color="transparent")
@@ -1501,13 +1502,14 @@ function doPost(e) {
         self._append_log(f"==========================================")
 
         try:
-            # Instantiate Review Generator (Gemini Web only)
+            # Instantiate Review Generator (Gemini Web & Google AI Studio)
             bm = self._gemini_web_provider.browser_manager
             review_gen = MultiAgentReviewProvider(
                 browser_mgr=bm,
                 sample_style=sample_style_key,
                 custom_sample_text=self._custom_sample_text,
                 quality_threshold=0.70,
+                review_video_engine=self._review_video_engine_var.get(),
                 write_content_engine=self._write_content_engine_var.get(),
             )
 

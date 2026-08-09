@@ -503,10 +503,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
     def health_check(self) -> Result[bool, ReviewError]:
         if self._browser_mgr:
             try:
-                status = self._browser_mgr.check_is_logged_in()
-                if status == SessionStatus.LOGGED_IN:
-                    return Result.Ok(True)
-                return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Cookie hoặc tài khoản Gemini Web chưa đăng nhập (hoặc hết hạn). Vui lòng nhập lại cookie!"))
+                session_mgr = self._browser_mgr._session_mgr
+                if not session_mgr.has_session_file():
+                    return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Chưa có Cookie Gemini Web (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
+                if not session_mgr.has_chatgpt_session():
+                    return Result.Err(ReviewError("❌ [Lỗi ChatGPT Web] Chưa có Cookie ChatGPT Web (Tab 2). Vui lòng bấm '🤖 Cookie ChatGPT' để nạp cookie!"))
+                return Result.Ok(True)
             except Exception as exc:
-                return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Cookie hoặc tài khoản Gemini Web chưa đăng nhập (hoặc hết hạn). Vui lòng nhập lại cookie!"))
+                return Result.Err(ReviewError(f"❌ [Lỗi Browser Session] Lỗi kiểm tra cookie: {exc}"))
         return Result.Ok(True)

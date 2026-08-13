@@ -102,10 +102,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         else:
             tab2_label = "Gemini Web"
 
-        # ── Pre-flight check: Verify Authentication ──
+        # ── BƯỚC 1: Kiểm tra Cookie & Phiên đăng nhập live ──
         if progress_cb:
-            progress_cb(f"Kiểm tra phiên đăng nhập {tab1_label} & {tab2_label}...", 0.02)
-        _logger.info("Verifying {} and {} session status...", tab1_label, tab2_label)
+            progress_cb(f"Bước 1: Kiểm tra Cookie & Phiên đăng nhập ({tab1_label} & {tab2_label})...", 0.02)
+        _logger.info("⚡ [Bước 1] Verifying {} and {} live session status...", tab1_label, tab2_label)
 
         session_mgr = self._browser_mgr._session_mgr
 
@@ -132,6 +132,31 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 "Tab 2 cần Cookie Claude để biên soạn kịch bản content.\n"
                 "Vui lòng bấm '🦙 Cookie Claude' trên giao diện để nạp cookie!"
             )
+
+        # 4. Live browser check: Mở trình duyệt để check phiên đăng nhập
+        try:
+            self._browser_mgr.verify_live_sessions(
+                review_video_engine=self._review_video_engine,
+                write_content_engine=self._write_content_engine,
+            )
+        except Exception as exc:
+            try:
+                self._browser_mgr.close()
+            except Exception:
+                pass
+            raise ReviewError(str(exc)) from exc
+
+        # 🎯 BƯỚC 1 THÀNH CÔNG: Đóng trình duyệt check theo đúng thiết kế của người dùng
+        _logger.info("✅ [Bước 1 Hoàn Tất] Cookie hợp lệ! Đang đóng trình duyệt check để khởi tạo phiên làm việc mới...")
+        try:
+            self._browser_mgr.close()
+        except Exception:
+            pass
+
+        # ── BƯỚC 2: Khởi tạo trình duyệt mới & Gửi các công việc tiếp theo ──
+        if progress_cb:
+            progress_cb(f"Bước 2: Mở trình duyệt mới & khởi tạo công việc ({tab1_label} & {tab2_label})...", 0.04)
+        _logger.info("🚀 [Bước 2] Launching fresh browser session for task execution...")
 
         p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
         p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
@@ -250,6 +275,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 if stage1_desc.lower().startswith(prefix):
                     stage1_desc = stage1_desc[len(prefix):].strip()
             stage1_desc = stage1_desc.strip('"').strip("'").strip()
+
+            # Sanity check: ensure description is not just a placeholder indicator
+            if any(ph in stage1_desc.lower() for ph in ["đang phân tích", "đang tạo", "thinking..."]) and len(stage1_desc) < 40:
+                _logger.warning("Tab 1 description returned placeholder '{}', waiting for actual output...", stage1_desc)
+                time.sleep(3.0)
+
             _logger.info("Tab 1 description (clip {}): {}...", clip_num, stage1_desc[:150])
         except Exception as exc:
             _logger.warning("Tab 1 error on clip {}: {}", clip_num, exc)

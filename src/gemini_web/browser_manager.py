@@ -644,72 +644,236 @@ class BrowserManager:
     # -------------------------------------------------------------
     # Session Authentication & Watchdog
     # -------------------------------------------------------------
-    def is_page_authenticated(self, page: Page) -> bool:
-        """Check if Gemini page is genuinely logged into Google account (not anonymous guest mode)."""
-        return self._on_browser_thread(self._is_page_authenticated_impl, page)
+    # Session Authentication & Watchdog
+    # -------------------------------------------------------------
+    def is_page_authenticated(self, page: Page, engine_type: str = "gemini_web") -> bool:
+        """Check if browser page is genuinely logged into account (not anonymous guest mode)."""
+        return self._on_browser_thread(self._is_page_authenticated_impl, page, engine_type)
 
-    def _is_page_authenticated_impl(self, page: Page) -> bool:
+    def _is_page_authenticated_impl(self, page: Page, engine_type: str = "gemini_web") -> bool:
         try:
             curr_url = page.url.lower()
-            # 1. If on explicit sign-in / service login URLs -> definitely not logged in
-            if any(p in curr_url for p in [
-                "accounts.google.com/servicelogin",
-                "accounts.google.com/signin",
-                "accounts.google.com/v3/signin",
-                "accounts.google.com/interactivelogin",
-            ]):
+
+            if engine_type == "claude_web":
+                if any(p in curr_url for p in ["claude.ai/login", "claude.ai/select-organization", "claude.ai/signup"]):
+                    self._logger.warning("[Auth Check] Claude URL is explicit login page: {}", curr_url)
+                    return False
+
+                # Reject guest mode if any login / sign up button is visible
+                login_sels = [
+                    "button:has-text('Log in')",
+                    "button:has-text('Sign in')",
+                    "button:has-text('Continue with Email')",
+                    "button:has-text('Continuer avec')",
+                    "button:has-text('Sign up')",
+                    "a[href*='login']",
+                    "input[type='email']",
+                    "input[name='email']",
+                ]
+                for sel in login_sels:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.is_visible(timeout=400):
+                            self._logger.warning("[Auth Check] Detected unauthenticated Claude login button: '{}'", sel)
+                            return False
+                    except Exception:
+                        pass
+
+                # Positive check for logged-in Claude elements
+                positive_sels = [
+                    "button:has-text('Free plan')",
+                    "button:has-text('Upgrade')",
+                    "a[href*='/settings']",
+                    "div.ProseMirror",
+                    "[contenteditable='true']",
+                    "textarea",
+                    "fieldset",
+                    "div.font-claude-message",
+                    "div.prose",
+                ]
+                for p_sel in positive_sels:
+                    try:
+                        if page.locator(p_sel).first.is_visible(timeout=600):
+                            self._logger.info("[Auth Check] Verified Claude logged-in element: '{}'", p_sel)
+                            return True
+                    except Exception:
+                        pass
+
+                # If URL is inside claude.ai/new or claude.ai/chat and no login buttons exist -> AUTHENTICATED!
+                if any(p in curr_url for p in ["claude.ai/new", "claude.ai/chat", "claude.ai/recents"]):
+                    self._logger.info("[Auth Check] Claude URL '{}' is valid authenticated workspace", curr_url)
+                    return True
+
                 return False
 
-            # 2. Check if Sign in / Đăng nhập button is visible in header or top navigation (Unauthenticated Guest Mode)
-            header_sign_in_sels = [
-                "header button:has-text('Sign in')",
-                "header button:has-text('Đăng nhập')",
-                "header a:has-text('Sign in')",
-                "header a:has-text('Đăng nhập')",
-                "a:has-text('Đăng nhập')",
-                "button:has-text('Đăng nhập')",
-                ".header-sign-in-button",
-            ]
-            for sel in header_sign_in_sels:
-                try:
-                    loc = page.locator(sel).first
-                    if loc.is_visible(timeout=500):
-                        self._logger.info("Detected unauthenticated Sign In button: '{}'", sel)
-                        return False
-                except Exception:
-                    pass
+            elif engine_type == "chatgpt_web":
+                if any(p in curr_url for p in ["chatgpt.com/auth", "openai.com/login"]):
+                    self._logger.warning("[Auth Check] ChatGPT URL is explicit login page: {}", curr_url)
+                    return False
 
-            # 3. Check for logged-in UI components (chat box, side nav, profile avatar)
-            profile_sels = [
-                "rich-textarea",
-                "div[contenteditable='true']",
-                "chat-app",
-                "bard-sidenav",
-                "side-navigation",
-                "a[href*='SignOutOptions']",
-                "a[href*='myaccount.google.com']",
-                "button[aria-label*='Google Account']",
-                "button[aria-label*='Tài khoản Google']",
-                "img[alt*='Google Account']",
-                "img[alt*='Tài khoản Google']",
-                "img[src*='googleusercontent.com']",
-            ]
-            for sel in profile_sels:
+                # Reject guest mode if any login / sign up button is visible (EN / VI / FR)
+                login_sels = [
+                    "button[data-testid='login-button']",
+                    "button:has-text('Log in')",
+                    "button:has-text('Sign in')",
+                    "button:has-text('Sign up')",
+                    "button:has-text('Đăng nhập')",
+                    "button:has-text('Đăng ký')",
+                    "a:has-text('Đăng nhập')",
+                    "a:has-text('Đăng ký')",
+                    "a[href*='login']",
+                    "a[href*='auth']",
+                ]
+                for sel in login_sels:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.is_visible(timeout=400):
+                            self._logger.warning("[Auth Check] Detected unauthenticated ChatGPT login button: '{}'", sel)
+                            return False
+                    except Exception:
+                        pass
+
+                # Positive check for logged in profile element or prompt textarea
+                profile_sels = [
+                    "div[data-testid='profile-button']",
+                    "button[aria-label*='User profile']",
+                    "button[data-testid='user-menu-button']",
+                    "img[alt*='User profile']",
+                    "img[src*='googleusercontent.com']",
+                    "img[src*='openai']",
+                    "nav a",
+                ]
+                for sel in profile_sels:
+                    try:
+                        if page.locator(sel).first.is_visible(timeout=400):
+                            self._logger.info("[Auth Check] Verified ChatGPT logged-in user profile: '{}'", sel)
+                            return True
+                    except Exception:
+                        pass
+
+                chat_box = page.locator("#prompt-textarea, textarea[data-id], div[contenteditable='true'], textarea").first
+                if chat_box.is_visible(timeout=800):
+                    return True
+                return False
+
+            elif engine_type == "google_ai_studio":
+                if "accounts.google.com" in curr_url:
+                    return False
+                login_sels = [
+                    "button:has-text('Sign in')",
+                    "a:has-text('Sign in')",
+                    "button:has-text('Đăng nhập')",
+                    "a:has-text('Đăng nhập')",
+                ]
+                for sel in login_sels:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.is_visible(timeout=400):
+                            self._logger.warning("[Auth Check] Detected unauthenticated AI Studio Sign In button: '{}'", sel)
+                            return False
+                    except Exception:
+                        pass
+                return "aistudio.google.com" in curr_url
+
+            else:
+                # Gemini Web
+                if any(p in curr_url for p in [
+                    "accounts.google.com/servicelogin",
+                    "accounts.google.com/signin",
+                    "accounts.google.com/v3/signin",
+                    "accounts.google.com/interactivelogin",
+                ]):
+                    self._logger.warning("[Auth Check] Current URL is explicit Google sign-in page: {}", curr_url)
+                    return False
+
+                # 1. Check for prominent 'Đăng nhập' / 'Sign in' buttons (Guest Mode detection)
+                guest_login_selectors = [
+                    "a[href*='ServiceLogin']",
+                    "a[href*='InteractiveLogin']",
+                    ".header-sign-in-button",
+                    "a:has-text('Đăng nhập')",
+                    "button:has-text('Đăng nhập')",
+                    "a:has-text('Sign in')",
+                    "button:has-text('Sign in')",
+                ]
+                for sel in guest_login_selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.is_visible(timeout=400):
+                            txt = (loc.inner_text() or "").strip().lower()
+                            if txt in ["đăng nhập", "sign in", "log in"] or "servicelogin" in (loc.get_attribute("href") or "").lower():
+                                self._logger.warning("[Auth Check] Detected guest mode Sign In button ('{}'): text='{}'", sel, txt)
+                                return False
+                    except Exception:
+                        pass
+
+                # 2. Positive Check: Logged-in user avatar or account element is visible -> AUTHENTICATED!
+                logged_in_selectors = [
+                    "a[href*='SignOutOptions']",
+                    "a[href*='myaccount.google.com']",
+                    "button[aria-label*='Google Account']",
+                    "button[aria-label*='Tài khoản Google']",
+                    "img[alt*='Google Account']",
+                    "img[alt*='Tài khoản Google']",
+                    "img[src*='googleusercontent.com']",
+                    "*:has-text('Tôi có thể giúp gì')",
+                ]
+                for sel in logged_in_selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.is_visible(timeout=600):
+                            self._logger.info("[Auth Check] Verified Gemini logged-in account element: '{}'", sel)
+                            return True
+                    except Exception:
+                        pass
+
+                # 3. Check prompt chat box AND verify NO sign-in button is present
                 try:
-                    loc = page.locator(sel).first
-                    if loc.is_visible(timeout=500):
+                    chat_box = page.locator("rich-textarea, div[contenteditable='true'], textarea").first
+                    if chat_box.is_visible(timeout=800):
+                        sign_in_btn = page.locator("a[href*='ServiceLogin'], .header-sign-in-button, a:has-text('Đăng nhập'), button:has-text('Đăng nhập')").first
+                        if sign_in_btn.is_visible(timeout=300):
+                            self._logger.warning("[Auth Check] Chat box visible BUT Sign In button ALSO visible -> Guest Mode!")
+                            return False
+                        self._logger.info("[Auth Check] Gemini chat input box visible & no Sign In buttons -> Authenticated.")
                         return True
                 except Exception:
                     pass
 
-            # 4. Fallback: If on gemini.google.com -> authenticated
-            if "gemini.google.com" in curr_url:
-                return True
-
-            return False
+                return False
         except Exception as exc:
             self._logger.debug("is_page_authenticated check error: {}", exc)
-            return True
+            return False
+
+    def verify_live_sessions(self, review_video_engine: str = "gemini_web", write_content_engine: str = "chatgpt_web") -> bool:
+        """Open stage pages and verify live logged-in authentication status before starting jobs."""
+        return self._on_browser_thread(self._verify_live_sessions_impl, review_video_engine, write_content_engine)
+
+    def _verify_live_sessions_impl(self, review_video_engine: str = "gemini_web", write_content_engine: str = "chatgpt_web") -> bool:
+        self._logger.info("Performing live browser session verification for Tab 1 ({}) and Tab 2 ({})...", review_video_engine, write_content_engine)
+
+        t1_name = "Google AI Studio" if review_video_engine == "google_ai_studio" else "Gemini Web"
+        if write_content_engine == "claude_web":
+            t2_name = "Claude Web"
+        elif write_content_engine == "chatgpt_web":
+            t2_name = "ChatGPT Web"
+        else:
+            t2_name = "Gemini Web"
+
+        # 1. Verify Tab 1
+        page1 = self.get_stage_page(1, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
+        if not self._is_page_authenticated_impl(page1, engine_type=review_video_engine):
+            self.save_dom_snapshot(page1, f"Tab 1 ({t1_name}) session unauthenticated", None)
+            raise GeminiWebAuthError(f"Phiên đăng nhập Tab 1 ({t1_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t1_name} mới!")
+
+        # 2. Verify Tab 2
+        page2 = self.get_stage_page(2, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
+        if not self._is_page_authenticated_impl(page2, engine_type=write_content_engine):
+            self.save_dom_snapshot(page2, f"Tab 2 ({t2_name}) session unauthenticated", None)
+            raise GeminiWebAuthError(f"Phiên đăng nhập Tab 2 ({t2_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t2_name} mới!")
+
+        self._logger.info("✅ Live session verification succeeded for both Tab 1 ({}) and Tab 2 ({})!", t1_name, t2_name)
+        return True
 
     def _watchdog_check_and_recover(self, page: Page, timeout_sec: int = 15) -> bool:
         """Detect expired/anonymous login and prompt automatic re-login / session recovery."""
@@ -1436,6 +1600,8 @@ class BrowserManager:
             # -------------------------------------------------------------
             # STAGE 1: GEMINI WEB WORKFLOW
             # -------------------------------------------------------------
+            # Only navigate if page is not already on Gemini Web.
+            # Preserves ongoing chat thread (Job 1 setup context) across all video clips.
             if "gemini.google.com" not in page.url.lower():
                 try:
                     _notify(f"Tab {stage_idx} (Đang truy cập Gemini Web)", 0.10)
@@ -1469,15 +1635,6 @@ class BrowserManager:
                             try:
                                 inp = file_inputs.nth(f_idx)
                                 inp.set_input_files(media_path_str, timeout=4000)
-                                try:
-                                    page.evaluate("""(el) => {
-                                        if (el) {
-                                            el.dispatchEvent(new Event('change', { bubbles: true }));
-                                            el.dispatchEvent(new Event('input', { bubbles: true }));
-                                        }
-                                    }""", inp.element_handle())
-                                except Exception:
-                                    pass
                                 upload_ok = True
                                 self._logger.info(
                                     "[Tab {}] Uploading video via direct file input injection: {} ({:.1f} MB)",
@@ -1535,21 +1692,16 @@ class BrowserManager:
                                     try:
                                         inp = file_inputs.nth(f_idx)
                                         inp.set_input_files(media_path_str, timeout=4000)
-                                        try:
-                                            page.evaluate("""(el) => {
-                                                if (el) {
-                                                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                                                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                                                }
-                                            }""", inp.element_handle())
-                                        except Exception:
-                                            pass
                                         upload_ok = True
                                         self._logger.info("[Tab {}] Uploaded video via direct file input after menu open", stage_idx)
                                         break
                                     except Exception:
                                         continue
                             if upload_ok:
+                                try:
+                                    page.keyboard.press("Escape")
+                                except Exception:
+                                    pass
                                 break
 
                             # Search for menu items that trigger file chooser
@@ -1706,30 +1858,72 @@ class BrowserManager:
             stable_count = 0
             gen_start = time.time()
 
+            PLACEHOLDER_TEXTS = [
+                "đang phân tích",
+                "đang tạo",
+                "đang xử lý",
+                "đang suy nghĩ",
+                "thinking",
+                "analyzing",
+                "processing",
+                "generating",
+            ]
+
             while time.time() - gen_start < 120.0:
                 try:
                     current_text = target_response.inner_text().strip()
                 except Exception:
                     current_text = ""
 
-                # Fast check if stop button is present (generation in progress)
-                stop_active = False
+                # Fast check if stop button or loading indicator is present
+                is_busy = False
                 try:
-                    stop_loc = page.locator("button[aria-label*='Stop' i], button[aria-label*='Dừng' i], button[aria-label*='stop' i]")
-                    stop_active = stop_loc.count() > 0 and stop_loc.first.is_visible()
+                    stop_loc = page.locator("button[aria-label*='Stop' i], button[aria-label*='Dừng' i], button[aria-label*='stop' i], mat-progress-spinner, .loading-spinner")
+                    if stop_loc.count() > 0 and stop_loc.first.is_visible():
+                        is_busy = True
                 except Exception:
                     pass
 
-                if current_text and current_text == last_text and not stop_active:
+                # Check if Copy icon / action toolbar is visible on the response container (100% completion indicator)
+                has_copy_btn = False
+                try:
+                    copy_selectors = [
+                        "button[aria-label*='Sao chép' i]",
+                        "button[aria-label*='Copy' i]",
+                        "button[aria-label*='sao chép' i]",
+                        "button[data-test-id='copy-button']",
+                        "button[data-testid*='copy']",
+                        "mat-icon:has-text('content_copy')",
+                        "button[aria-label*='Good response' i]",
+                        "button[aria-label*='Hài lòng' i]",
+                    ]
+                    for c_sel in copy_selectors:
+                        c_loc = target_response.locator(c_sel)
+                        if c_loc.count() > 0 and c_loc.first.is_visible():
+                            has_copy_btn = True
+                            break
+                except Exception:
+                    pass
+
+                curr_lower = current_text.lower()
+                is_placeholder = any(ph in curr_lower for ph in PLACEHOLDER_TEXTS) or (len(current_text) < 25 and is_busy)
+
+                # Immediate completion when Copy icon is rendered and text is valid!
+                if has_copy_btn and not is_placeholder and current_text:
+                    self._logger.info("[Tab {}] Verified Copy Icon present -> Response generation 100% complete ({:.1f}s)", stage_idx, time.time() - gen_start)
+                    last_text = current_text
+                    break
+
+                if current_text and current_text == last_text and not is_busy and not is_placeholder:
                     stable_count += 1
-                    if stable_count >= 2:
+                    if stable_count >= 3:
                         self._logger.info("[Tab {}] Response generation finished & stabilized ({:.1f}s)", stage_idx, time.time() - gen_start)
                         break
                 else:
                     stable_count = 0
                     last_text = current_text
 
-                time.sleep(0.4)
+                time.sleep(0.5)
 
             if not last_text:
                 snapshot_dir = self.save_dom_snapshot(page, f"Tab {stage_idx} empty response text", job_id)

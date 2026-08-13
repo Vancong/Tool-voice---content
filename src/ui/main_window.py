@@ -838,15 +838,45 @@ class MainWindow(ctk.CTk):
             text="Trạng thái phiên:",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=TEXT_SECONDARY,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 4))
 
-        self._lbl_session_status = ctk.CTkLabel(
+        self._lbl_status_gemini = ctk.CTkLabel(
             status_row,
-            text="Đang kiểm tra...",
+            text="Gemini: ...",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#f59e0b",
         )
-        self._lbl_session_status.pack(side="left", padx=8)
+        self._lbl_status_gemini.pack(side="left")
+
+        ctk.CTkLabel(
+            status_row,
+            text=" | ",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+        ).pack(side="left")
+
+        self._lbl_status_chatgpt = ctk.CTkLabel(
+            status_row,
+            text="ChatGPT: ...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f59e0b",
+        )
+        self._lbl_status_chatgpt.pack(side="left")
+
+        ctk.CTkLabel(
+            status_row,
+            text=" | ",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+        ).pack(side="left")
+
+        self._lbl_status_claude = ctk.CTkLabel(
+            status_row,
+            text="Claude: ...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f59e0b",
+        )
+        self._lbl_status_claude.pack(side="left")
 
         # 4 Actions (1 row)
         btn_action_row = ctk.CTkFrame(self._web_session_card, fg_color="transparent")
@@ -1450,34 +1480,30 @@ function doPost(e) {
         has_chatgpt = sm.has_chatgpt_session()
         has_claude = sm.has_claude_session()
 
-        status_parts = []
-        if has_gemini:
-            status_parts.append("Gemini: Ready ✓")
-        else:
-            status_parts.append("Gemini: Chưa dán ❌")
+        if hasattr(self, "_lbl_status_gemini"):
+            if has_gemini:
+                self._lbl_status_gemini.configure(text="Gemini: Ready ✓", text_color=ACCENT_GREEN)
+            else:
+                self._lbl_status_gemini.configure(text="Gemini: Chưa dán ❌", text_color=ACCENT_RED)
 
-        if has_chatgpt:
-            status_parts.append("ChatGPT: Ready ✓")
-        else:
-            status_parts.append("ChatGPT: Chưa dán ❌")
+        if hasattr(self, "_lbl_status_chatgpt"):
+            if has_chatgpt:
+                self._lbl_status_chatgpt.configure(text="ChatGPT: Ready ✓", text_color=ACCENT_GREEN)
+            else:
+                self._lbl_status_chatgpt.configure(text="ChatGPT: Chưa dán ❌", text_color=ACCENT_RED)
 
-        if has_claude:
-            status_parts.append("Claude: Ready ✓")
-        else:
-            status_parts.append("Claude: Chưa dán ❌")
+        if hasattr(self, "_lbl_status_claude"):
+            if has_claude:
+                self._lbl_status_claude.configure(text="Claude: Ready ✓", text_color=ACCENT_GREEN)
+            else:
+                self._lbl_status_claude.configure(text="Claude: Chưa dán ❌", text_color=ACCENT_RED)
 
-        full_status = " | ".join(status_parts)
-        if has_gemini and (has_chatgpt or has_claude):
-            self._lbl_session_status.configure(text=full_status, text_color=ACCENT_GREEN)
-            if hasattr(self, "_lbl_hdr_status"):
+        if hasattr(self, "_lbl_hdr_status"):
+            if has_gemini and (has_chatgpt or has_claude):
                 self._lbl_hdr_status.configure(text="● 2-Tab Ready", text_color=ACCENT_GREEN)
-        elif has_gemini or has_chatgpt or has_claude:
-            self._lbl_session_status.configure(text=full_status, text_color="#f59e0b")
-            if hasattr(self, "_lbl_hdr_status"):
+            elif has_gemini or has_chatgpt or has_claude:
                 self._lbl_hdr_status.configure(text="● Đã dán 1 phần Session", text_color="#f59e0b")
-        else:
-            self._lbl_session_status.configure(text=full_status, text_color=ACCENT_RED)
-            if hasattr(self, "_lbl_hdr_status"):
+            else:
                 self._lbl_hdr_status.configure(text="● Chưa dán Cookie", text_color=ACCENT_RED)
 
     def _on_import_cookie(self) -> None:
@@ -1498,7 +1524,7 @@ function doPost(e) {
 
         ctk.CTkLabel(
             dialog,
-            text="Dán Cookie của bạn vào ô bên dưới (Hỗ trợ dạng JSON từ Cookie-Editor/EditThisCookie hoặc dạng text SID=...; HSID=...):",
+            text="Dán Cookie Gemini của bạn vào ô bên dưới (Hỗ trợ dạng JSON từ Cookie-Editor/EditThisCookie hoặc dạng text SID=...; HSID=...):",
             font=ctk.CTkFont(size=11),
             text_color=TEXT_MUTED,
             wraplength=580,
@@ -1522,15 +1548,34 @@ function doPost(e) {
         def _do_save():
             raw_text = txt_cookie.get("1.0", "end").strip()
             if not raw_text:
-                messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie trước khi lưu!", parent=dialog)
+                messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie Gemini trước khi lưu!", parent=dialog)
                 return
+
+            if raw_text.startswith("[") or raw_text.startswith("{"):
+                if not any(k in raw_text.lower() for k in ["google.com", "gemini.google.com"]):
+                    messagebox.showerror(
+                        "Lỗi Cookie Gemini",
+                        "❌ Chuỗi Cookie Gemini không hợp lệ hoặc đã hết hạn!\n\nVui lòng mở trang gemini.google.com và dán lại Cookie mới.",
+                        parent=dialog,
+                    )
+                    return
 
             try:
                 count = self._gemini_web_provider.import_cookies(raw_text)
                 if count > 0:
+                    try:
+                        self._gemini_web_provider.browser_manager.close()
+                    except Exception:
+                        pass
+                    try:
+                        self._gemini_web_provider.session_manager.clear_profile_dir()
+                    except Exception:
+                        pass
+                    if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
+                        self._multi_agent_provider._tabs_initialized = False
                     self._refresh_gemini_status()
-                    self._append_log(f"✅ Đã import thành công {count} cookies & tự động nạp vào trình duyệt!")
-                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies thành công!\nBây giờ bạn có thể bấm Bắt Đầu Review ngay mà không cần tắt/mở lại tool.", parent=dialog)
+                    self._append_log(f"✅ Đã import thành công {count} cookies Gemini & làm sạch trình duyệt cũ. Lần chạy tới sẽ nạp trình duyệt mới!")
+                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies Gemini thành công!\nTrình duyệt cũ đã được đóng và dọn dẹp. Khi bạn bấm Bắt Đầu Review, hệ thống sẽ mở trình duyệt mới và kiểm tra lại từ đầu.", parent=dialog)
                     dialog.destroy()
                 else:
                     messagebox.showerror("Lỗi Cookie", "Không phân tích được chuỗi Cookie! Vui lòng kiểm tra lại định dạng JSON hoặc Header string.", parent=dialog)
@@ -1539,7 +1584,7 @@ function doPost(e) {
 
         ctk.CTkButton(
             btn_row,
-            text="✅ Lưu Cookie",
+            text="✅ Lưu Cookie Gemini",
             fg_color=ACCENT_BLUE,
             hover_color=ACCENT_BLUE_HOVER,
             font=ctk.CTkFont(size=12, weight="bold"),
@@ -1602,15 +1647,32 @@ function doPost(e) {
                 messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie ChatGPT trước khi lưu!", parent=dialog)
                 return
 
+            if raw_text.startswith("[") or raw_text.startswith("{"):
+                if not any(k in raw_text.lower() for k in ["chatgpt.com", "openai.com"]):
+                    messagebox.showerror(
+                        "Lỗi Cookie ChatGPT",
+                        "❌ Chuỗi Cookie ChatGPT không hợp lệ hoặc đã hết hạn!\n\nVui lòng mở trang chatgpt.com và dán lại Cookie mới.",
+                        parent=dialog,
+                    )
+                    return
+
             try:
-                # Import into session manager targeting .chatgpt.com
                 mgr = self._gemini_web_provider.session_manager
                 count = mgr.import_cookies_from_raw_string(raw_text, target_domain=".chatgpt.com")
                 if count > 0:
-                    self._gemini_web_provider.browser_manager.reload_cookies()
+                    try:
+                        self._gemini_web_provider.browser_manager.close()
+                    except Exception:
+                        pass
+                    try:
+                        mgr.clear_profile_dir()
+                    except Exception:
+                        pass
+                    if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
+                        self._multi_agent_provider._tabs_initialized = False
                     self._refresh_gemini_status()
-                    self._append_log(f"✅ Đã import thành công {count} cookies ChatGPT & tự động nạp vào Tab 2 trình duyệt!")
-                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies ChatGPT thành công!\nBây giờ Tab 2 sẽ tự động chạy bằng ChatGPT Web.", parent=dialog)
+                    self._append_log(f"✅ Đã import thành công {count} cookies ChatGPT & làm sạch trình duyệt cũ. Lần chạy tới sẽ nạp trình duyệt mới!")
+                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies ChatGPT thành công!\nTrình duyệt cũ đã được đóng và dọn dẹp. Khi bạn bấm Bắt Đầu Review, hệ thống sẽ mở trình duyệt mới và kiểm tra lại từ đầu.", parent=dialog)
                     dialog.destroy()
                 else:
                     messagebox.showerror("Lỗi Cookie", "Không phân tích được chuỗi Cookie ChatGPT! Vui lòng kiểm tra lại định dạng JSON.", parent=dialog)
@@ -1682,15 +1744,32 @@ function doPost(e) {
                 messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie Claude trước khi lưu!", parent=dialog)
                 return
 
+            if raw_text.startswith("[") or raw_text.startswith("{"):
+                if not any(k in raw_text.lower() for k in ["claude.ai", "anthropic.com"]):
+                    messagebox.showerror(
+                        "Lỗi Cookie Claude",
+                        "❌ Chuỗi Cookie Claude không hợp lệ hoặc đã hết hạn!\n\nVui lòng mở trang claude.ai và dán lại Cookie mới.",
+                        parent=dialog,
+                    )
+                    return
+
             try:
-                # Import into session manager targeting .claude.ai
                 mgr = self._gemini_web_provider.session_manager
                 count = mgr.import_cookies_from_raw_string(raw_text, target_domain=".claude.ai")
                 if count > 0:
-                    self._gemini_web_provider.browser_manager.reload_cookies()
+                    try:
+                        self._gemini_web_provider.browser_manager.close()
+                    except Exception:
+                        pass
+                    try:
+                        mgr.clear_profile_dir()
+                    except Exception:
+                        pass
+                    if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
+                        self._multi_agent_provider._tabs_initialized = False
                     self._refresh_gemini_status()
-                    self._append_log(f"✅ Đã import thành công {count} cookies Claude & tự động nạp vào Tab 2 trình duyệt!")
-                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies Claude thành công!\nBây giờ Tab 2 có thể tự động chạy bằng Claude Web.", parent=dialog)
+                    self._append_log(f"✅ Đã import thành công {count} cookies Claude & làm sạch trình duyệt cũ. Lần chạy tới sẽ nạp trình duyệt mới!")
+                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies Claude thành công!\nTrình duyệt cũ đã được đóng và dọn dẹp. Khi bạn bấm Bắt Đầu Review, hệ thống sẽ mở trình duyệt mới và kiểm tra lại từ đầu.", parent=dialog)
                     dialog.destroy()
                 else:
                     messagebox.showerror("Lỗi Cookie", "Không phân tích được chuỗi Cookie Claude! Vui lòng kiểm tra lại định dạng JSON.", parent=dialog)
@@ -2086,12 +2165,37 @@ function doPost(e) {
         engine_mode = "gemini_web"
         is_web_mode = True
 
-        # Kiểm tra session Gemini Web
-        status = self._gemini_web_provider.get_session_status()
-        if status == SessionStatus.NOT_LOGGED_IN:
+        # 1. Kiểm tra session Tab 1 (Mô tả Video)
+        sm = self._gemini_web_provider.session_manager
+        rev_engine = self._review_video_engine_var.get()
+        if rev_engine == "gemini_web" and not sm.has_session_file():
             messagebox.showwarning(
-                "Chưa có Cookie Gemini",
-                "Bạn chưa cấu hình Cookie Gemini Web.\nVui lòng dán Cookie để tiếp tục.",
+                "Chưa có Cookie Gemini (Tab 1)",
+                "Bạn chưa cấu hình Cookie Gemini Web cho Tab 1 (Mô tả Video).\nVui lòng dán Cookie Gemini để tiếp tục.",
+            )
+            self._on_import_cookie()
+            return
+
+        # 2. Kiểm tra session Tab 2 (Viết Content) theo AI được chọn
+        write_engine = self._write_content_engine_var.get()
+        if write_engine == "chatgpt_web" and not sm.has_chatgpt_session():
+            messagebox.showwarning(
+                "Chưa có Cookie ChatGPT (Tab 2)",
+                "Bạn đã chọn ChatGPT Web để viết content nhưng chưa dán Cookie ChatGPT.\nVui lòng dán Cookie ChatGPT để tiếp tục.",
+            )
+            self._on_import_chatgpt_cookie()
+            return
+        elif write_engine == "claude_web" and not sm.has_claude_session():
+            messagebox.showwarning(
+                "Chưa có Cookie Claude (Tab 2)",
+                "Bạn đã chọn Claude Web để viết content nhưng chưa dán Cookie Claude.\nVui lòng dán Cookie Claude để tiếp tục.",
+            )
+            self._on_import_claude_cookie()
+            return
+        elif write_engine == "gemini_web" and not sm.has_session_file():
+            messagebox.showwarning(
+                "Chưa có Cookie Gemini (Tab 2)",
+                "Bạn đã chọn Gemini Web để viết content nhưng chưa dán Cookie Gemini.\nVui lòng dán Cookie Gemini để tiếp tục.",
             )
             self._on_import_cookie()
             return
@@ -2252,6 +2356,9 @@ function doPost(e) {
     def _handle_pipeline_complete(self, result: Result) -> None:
         self._reset_ui_state()
 
+        if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
+            self._multi_agent_provider._tabs_initialized = False
+
         if result.is_ok:
             self._progress_bar.set(1.0)
             self._lbl_pct.configure(text="100%")
@@ -2273,7 +2380,27 @@ function doPost(e) {
             self._lbl_stage.configure(text="Trạng thái: Xử lý thất bại ❌")
             err_msg = str(result.error)
             self._append_log(f"❌ Pipeline thất bại: {err_msg}")
-            messagebox.showerror("Lỗi xử lý", f"Pipeline gặp lỗi:\n\n{err_msg}")
+
+            # Always close browser instance on error so next run scans fresh
+            try:
+                if hasattr(self, "_gemini_web_provider") and self._gemini_web_provider.browser_manager:
+                    self._gemini_web_provider.browser_manager.close()
+            except Exception:
+                pass
+
+            # Autodetect cookie / auth errors and offer instant re-import dialog for the specific AI engine
+            err_lower = err_msg.lower()
+            if "chatgpt" in err_lower and ("hết hạn" in err_lower or "chưa đăng nhập" in err_lower or "cookie" in err_lower):
+                if messagebox.askyesno("Cookie ChatGPT Hết Hạn", f"Phiên đăng nhập ChatGPT (Tab 2) đã hết hạn hoặc chưa đăng nhập!\n\nLỗi: {err_msg}\n\nĐã tự động đóng trình duyệt. Bạn có muốn dán Cookie ChatGPT mới ngay bây giờ không?"):
+                    self._on_import_chatgpt_cookie()
+            elif "claude" in err_lower and ("hết hạn" in err_lower or "chưa đăng nhập" in err_lower or "cookie" in err_lower):
+                if messagebox.askyesno("Cookie Claude Hết Hạn", f"Phiên đăng nhập Claude (Tab 2) đã hết hạn hoặc chưa đăng nhập!\n\nLỗi: {err_msg}\n\nĐã tự động đóng trình duyệt. Bạn có muốn dán Cookie Claude mới ngay bây giờ không?"):
+                    self._on_import_claude_cookie()
+            elif ("gemini" in err_lower or "tab 1" in err_lower) and ("hết hạn" in err_lower or "chưa đăng nhập" in err_lower or "cookie" in err_lower):
+                if messagebox.askyesno("Cookie Gemini Hết Hạn", f"Phiên đăng nhập Gemini (Tab 1) đã hết hạn hoặc chưa đăng nhập!\n\nLỗi: {err_msg}\n\nĐã tự động đóng trình duyệt. Bạn có muốn dán Cookie Gemini mới ngay bây giờ không?"):
+                    self._on_import_cookie()
+            else:
+                messagebox.showerror("Lỗi xử lý", f"Pipeline gặp lỗi:\n\n{err_msg}")
 
     def _reset_ui_state(self) -> None:
         self._btn_generate.configure(state="normal")

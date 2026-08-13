@@ -58,7 +58,16 @@ class SessionManager:
                 cookies = data.get("cookies", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                 chatgpt_domains = {"chatgpt.com", ".chatgpt.com", "openai.com", ".openai.com"}
                 chatgpt_cookies = [c for c in cookies if isinstance(c, dict) and c.get("domain", "").lower() in chatgpt_domains]
-                return len(chatgpt_cookies) > 0
+                if not chatgpt_cookies:
+                    return False
+                auth_names = {"__secure-next-auth.session-token", "next-auth.session-token", "__cf_bm", "cf_clearance", "_pcf", "oai-did"}
+                has_auth = any(
+                    c.get("name", "").lower() in auth_names
+                    or "session" in c.get("name", "").lower()
+                    or "auth" in c.get("name", "").lower()
+                    for c in chatgpt_cookies
+                )
+                return has_auth if has_auth else len(chatgpt_cookies) > 0
         except Exception:
             return False
 
@@ -72,7 +81,16 @@ class SessionManager:
                 cookies = data.get("cookies", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                 claude_domains = {"claude.ai", ".claude.ai", "anthropic.com", ".anthropic.com"}
                 claude_cookies = [c for c in cookies if isinstance(c, dict) and c.get("domain", "").lower() in claude_domains]
-                return len(claude_cookies) > 0
+                if not claude_cookies:
+                    return False
+                auth_names = {"sessionkey", "claude_session", "__cf_bm", "cf_clearance"}
+                has_auth = any(
+                    c.get("name", "").lower() in auth_names
+                    or "session" in c.get("name", "").lower()
+                    or str(c.get("value", "")).startswith("sk-ant-")
+                    for c in claude_cookies
+                )
+                return has_auth if has_auth else len(claude_cookies) > 0
         except Exception:
             return False
 
@@ -163,6 +181,18 @@ class SessionManager:
                 except Exception:
                     pass
 
+            # Purge old cookies belonging to the target engine before adding new ones
+            clean_target = target_domain.lstrip(".").lower()
+            if "google" in clean_target or "gemini" in clean_target:
+                target_domains = {"google.com", ".google.com", "gemini.google.com", ".gemini.google.com"}
+                existing_cookies = [c for c in existing_cookies if isinstance(c, dict) and c.get("domain", "").lower() not in target_domains]
+            elif "chatgpt" in clean_target or "openai" in clean_target:
+                target_domains = {"chatgpt.com", ".chatgpt.com", "openai.com", ".openai.com"}
+                existing_cookies = [c for c in existing_cookies if isinstance(c, dict) and c.get("domain", "").lower() not in target_domains]
+            elif "claude" in clean_target or "anthropic" in clean_target:
+                target_domains = {"claude.ai", ".claude.ai", "anthropic.com", ".anthropic.com"}
+                existing_cookies = [c for c in existing_cookies if isinstance(c, dict) and c.get("domain", "").lower() not in target_domains]
+
             # Merge: new cookies overwrite old ones with same name & domain
             cookie_dict = {(c.get("domain", ""), c.get("name", "")): c for c in existing_cookies}
             for c in cookies_list:
@@ -177,6 +207,16 @@ class SessionManager:
 
         return 0
 
+    def clear_profile_dir(self) -> None:
+        """Clear browser profile directory to ensure Chrome loads fresh cookies from session file."""
+        try:
+            if self._profile_dir.exists():
+                shutil.rmtree(self._profile_dir, ignore_errors=True)
+                self._profile_dir.mkdir(parents=True, exist_ok=True)
+                self._logger.info("Cleared browser profile dir: {}", self._profile_dir)
+        except Exception as exc:
+            self._logger.warning("Error clearing profile dir: {}", exc)
+
     def clear_session(self) -> bool:
         """Clear session files and browser profile."""
         try:
@@ -184,10 +224,7 @@ class SessionManager:
                 self._session_path.unlink()
                 self._logger.info("Removed session file: {}", self._session_path)
 
-            if self._profile_dir.exists():
-                shutil.rmtree(self._profile_dir, ignore_errors=True)
-                self._profile_dir.mkdir(parents=True, exist_ok=True)
-                self._logger.info("Cleared browser profile dir: {}", self._profile_dir)
+            self.clear_profile_dir()
             return True
         except Exception as exc:
             self._logger.error("Failed to clear session: {}", exc)

@@ -1058,7 +1058,17 @@ class BrowserManager:
 
                 while time.time() - gen_start < 120.0:
                     try:
-                        current_text = target_response.inner_text().strip()
+                        # Prefer inner .markdown / .prose container to avoid action buttons like 'Sửa', 'Sao chép'
+                        prose_el = target_response.locator(".markdown, .prose, div.flex-col").first
+                        if prose_el.count() > 0 and prose_el.is_visible():
+                            current_text = prose_el.inner_text().strip()
+                        else:
+                            current_text = target_response.inner_text().strip()
+                        
+                        # Clean UI button labels if captured
+                        lines = [line.strip() for line in current_text.splitlines()]
+                        filtered_lines = [l for l in lines if l not in {"Sửa", "Edit", "Copy", "Sao chép", "Chia sẻ", "Share"}]
+                        current_text = "\n".join(filtered_lines).strip()
                     except Exception:
                         current_text = ""
 
@@ -1256,16 +1266,11 @@ class BrowserManager:
 
             if not self._watchdog_check_and_recover(page):
                 self.save_dom_snapshot(page, f"Tab {stage_idx} session watchdog recovery failed", job_id)
-                raise GeminiWebAuthError(f"Gemini Web session on Tab {stage_idx} expired. Please log in.")
+                raise GeminiWebAuthError(f"Phiên đăng nhập Gemini Web (Tab {stage_idx}) đã hết hạn hoặc chưa đăng nhập. Vui lòng bấm nút '🍪 Cookie Gemini' trên phần mềm để dán Cookie mới!")
 
             # --- UPLOAD ORIGINAL VIDEO FILE IF PROVIDED ---
             if media_path and media_path.exists():
                 _notify(f"Tab {stage_idx} (Đang đính kèm video clip...)", 0.20)
-                self._logger.info(
-                    "[Tab {}] Uploading video: {} ({:.1f} MB)",
-                    stage_idx, media_path.name,
-                    media_path.stat().st_size / (1024 * 1024),
-                )
                 upload_ok = False
                 media_path_str = str(media_path.resolve())
 
@@ -1276,22 +1281,35 @@ class BrowserManager:
                 except Exception:
                     pass
 
-                # ── STRATEGY 1: Direct set_input_files on hidden file input ───────────────
+                # ── STRATEGY 1: Direct set_input_files on hidden input[type='file'] ───────────────
                 try:
                     file_inputs = page.locator("input[type='file']")
                     if file_inputs.count() > 0:
                         for f_idx in range(file_inputs.count()):
                             try:
-                                file_inputs.nth(f_idx).set_input_files(media_path_str, timeout=4000)
-                                self._logger.info("[Tab {}] Direct set_input_files succeeded on input #{}", stage_idx, f_idx)
+                                inp = file_inputs.nth(f_idx)
+                                inp.set_input_files(media_path_str, timeout=4000)
+                                try:
+                                    page.evaluate("""(el) => {
+                                        if (el) {
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        }
+                                    }""", inp.element_handle())
+                                except Exception:
+                                    pass
                                 upload_ok = True
+                                self._logger.info(
+                                    "[Tab {}] Uploading video via direct file input injection: {} ({:.1f} MB)",
+                                    stage_idx, media_path.name, media_path.stat().st_size / (1024 * 1024)
+                                )
                                 break
                             except Exception:
                                 continue
                 except Exception as exc_dir:
                     self._logger.debug("[Tab {}] Direct input upload attempt: {}", stage_idx, exc_dir)
 
-                # ── STRATEGY 2: 2-step Gemini Web menu upload ─────────────────────────────
+                # ── STRATEGY 2: 2-step Gemini Web menu upload with File Chooser ─────────────────────────────
                 if not upload_ok:
                     UPLOAD_MENU_BUTTON_SELECTORS = [
                         "button[aria-label*='t\u1ea3i l\u00ean']",   # "Nội dung tải lên và công cụ"
@@ -1317,7 +1335,6 @@ class BrowserManager:
 
                     for menu_btn_sel in UPLOAD_MENU_BUTTON_SELECTORS:
                         try:
-                            # Scope lookup to bottom chat input area to avoid clicking video elements in chat history
                             bottom_area = page.locator("rich-textarea ~ *, form, [class*='input-container'], [class*='bottom-container'], [class*='chat-bar']").last
                             if bottom_area.count() > 0 and bottom_area.locator(menu_btn_sel).count() > 0:
                                 menu_btn = bottom_area.locator(menu_btn_sel).last
@@ -1327,9 +1344,33 @@ class BrowserManager:
                             if not menu_btn.is_visible(timeout=1000):
                                 continue
 
-                            self._logger.info("[Tab {}] Clicking upload menu button at bottom input bar: {}", stage_idx, menu_btn_sel)
+                            self._logger.info("[Tab {}] Opening upload menu button: {}", stage_idx, menu_btn_sel)
                             menu_btn.click()
                             time.sleep(0.8)
+
+                            # Re-check direct set_input_files after opening upload menu
+                            file_inputs = page.locator("input[type='file']")
+                            if file_inputs.count() > 0:
+                                for f_idx in range(file_inputs.count()):
+                                    try:
+                                        inp = file_inputs.nth(f_idx)
+                                        inp.set_input_files(media_path_str, timeout=4000)
+                                        try:
+                                            page.evaluate("""(el) => {
+                                                if (el) {
+                                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                                }
+                                            }""", inp.element_handle())
+                                        except Exception:
+                                            pass
+                                        upload_ok = True
+                                        self._logger.info("[Tab {}] Uploaded video via direct file input after menu open", stage_idx)
+                                        break
+                                    except Exception:
+                                        continue
+                            if upload_ok:
+                                break
 
                             # Search for menu items that trigger file chooser
                             for item_sel in MENU_ITEM_SELECTORS:
@@ -1341,7 +1382,7 @@ class BrowserManager:
                                                 with page.expect_file_chooser(timeout=4000) as fc_info:
                                                     item.click()
                                                 fc_info.value.set_files(media_path_str)
-                                                self._logger.info("[Tab {}] Uploaded via menu item '{}'", stage_idx, item_sel)
+                                                self._logger.info("[Tab {}] Uploaded via menu item chooser '{}'", stage_idx, item_sel)
                                                 upload_ok = True
                                                 break
                                             except Exception:
@@ -1359,7 +1400,7 @@ class BrowserManager:
                                 with page.expect_file_chooser(timeout=3000) as fc_info2:
                                     menu_btn.click()
                                 fc_info2.value.set_files(media_path_str)
-                                self._logger.info("[Tab {}] Uploaded via direct file chooser from button", stage_idx)
+                                self._logger.info("[Tab {}] Uploaded via file chooser from upload button", stage_idx)
                                 upload_ok = True
                                 break
                             except Exception:
@@ -1378,8 +1419,15 @@ class BrowserManager:
                             continue
 
                 if upload_ok:
-                    self._logger.info("[Tab {}] Video attached successfully! Waiting 5s for Gemini Web upload processing...", stage_idx)
-                    time.sleep(5.0)
+                    self._logger.info("[Tab {}] File video đã được gắn chặt cố định vào phiên làm việc! Đang chờ hoàn tất nạp...", stage_idx)
+                    wait_start = time.time()
+                    while time.time() - wait_start < 15.0:
+                        spinners = page.locator("mat-progress-spinner, mat-spinner, [role='progressbar'], [class*='spinner'], [class*='uploading']")
+                        if spinners.count() > 0 and any(s.is_visible() for s in spinners.all()):
+                            time.sleep(1.0)
+                        else:
+                            break
+                    time.sleep(2.0)
                 else:
                     self._logger.error("[Tab {}] All upload strategies failed — video not attached", stage_idx)
 
@@ -1479,29 +1527,29 @@ class BrowserManager:
             gen_start = time.time()
 
             while time.time() - gen_start < 120.0:
-                stop_btn, _ = self._find_element_with_fallback(
-                    page,
-                    STOP_BUTTON_SELECTORS,
-                    description=f"Tab {stage_idx} Stop Button",
-                    timeout_per_selector_ms=300,
-                    max_retries=1,
-                )
-                stop_active = (stop_btn is not None)
-
                 try:
                     current_text = target_response.inner_text().strip()
                 except Exception:
                     current_text = ""
 
+                # Fast check if stop button is present (generation in progress)
+                stop_active = False
+                try:
+                    stop_loc = page.locator("button[aria-label*='Stop' i], button[aria-label*='Dừng' i], button[aria-label*='stop' i]")
+                    stop_active = stop_loc.count() > 0 and stop_loc.first.is_visible()
+                except Exception:
+                    pass
+
                 if current_text and current_text == last_text and not stop_active:
                     stable_count += 1
-                    if stable_count >= 3:
+                    if stable_count >= 2:
+                        self._logger.info("[Tab {}] Response generation finished & stabilized ({:.1f}s)", stage_idx, time.time() - gen_start)
                         break
                 else:
                     stable_count = 0
                     last_text = current_text
 
-                time.sleep(1.0)
+                time.sleep(0.4)
 
             if not last_text:
                 snapshot_dir = self.save_dom_snapshot(page, f"Tab {stage_idx} empty response text", job_id)
@@ -1561,7 +1609,7 @@ class BrowserManager:
             # Session Watchdog check
             if not self._watchdog_check_and_recover(page):
                 self.save_dom_snapshot(page, "Session expired / Watchdog recovery failed", job_id)
-                raise GeminiWebAuthError("Gemini Web session is expired or not logged in. Please log in first.")
+                raise GeminiWebAuthError("Phiên đăng nhập Gemini Web đã hết hạn hoặc chưa đăng nhập. Vui lòng bấm nút '🍪 Cookie Gemini' trên phần mềm để dán Cookie mới!")
 
             # Conversation Cleanup: Start fresh chat to avoid context leakage
             _notify("Starting fresh conversation", 0.35)

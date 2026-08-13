@@ -174,3 +174,42 @@ class GoogleSheetExporter:
             "webhook_status": webhook_status,
         }
 
+    @staticmethod
+    def sync_single_clip_to_sheet(
+        stt: str,
+        content: str,
+        voice_filename: str,
+        webhook_url: Optional[str] = None,
+        job_id: str = "live",
+    ) -> bool:
+        """Immediately push a single finished clip's content to Google Sheet Webhook."""
+        webhook_target = webhook_url or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
+        if not webhook_target or not webhook_target.startswith("http"):
+            return False
+
+        row = {
+            "stt_video": stt,
+            "noi_dung_moi_viet": content,
+            "voice": voice_filename,
+        }
+        payload = {
+            "job_id": job_id,
+            "total_rows": 1,
+            "rows": [row],
+        }
+
+        def _do_post():
+            try:
+                _logger.info("Live-syncing Clip {} content to Google Sheet Webhook...", stt)
+                res = requests.post(webhook_target, json=payload, timeout=15, allow_redirects=True)
+                if res.status_code in (200, 302):
+                    _logger.info("Successfully live-synced Clip {} content to Google Sheet!", stt)
+                else:
+                    _logger.warning("Live sync Clip {} returned HTTP {}: {}", stt, res.status_code, res.text)
+            except Exception as exc:
+                _logger.warning("Failed live-syncing Clip {} to Google Sheet: {}", stt, exc)
+
+        import threading
+        threading.Thread(target=_do_post, daemon=True).start()
+        return True
+

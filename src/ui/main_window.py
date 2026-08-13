@@ -13,6 +13,7 @@ Tích hợp:
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import subprocess
@@ -21,7 +22,9 @@ import threading
 import uuid
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Optional
+from typing import List, Optional
+
+import requests
 
 import customtkinter as ctk
 from PIL import Image
@@ -74,12 +77,243 @@ ACCENT_SLATE = "#334155"
 ACCENT_SLATE_HOVER = "#475569"
 
 _REVIEW_STYLES = ["Documentary", "Storytelling", "Funny", "Shorts"]
-_VOICE_OPTIONS = [
-    "ElevenLabs: Kat (Nữ - Sharp Educator)",
-    "ElevenLabs: Parker (Nam - Professional)",
-    "ElevenLabs: Adam (Nam - Free API)",
+
+DEFAULT_ELEVENLABS_VOICES = [
+    {"name": "Kat (Nữ - Sharp Educator)", "id": "RiK8PTtVIeKKoFFTk9fg"},
+    {"name": "Parker (Nam - Professional)", "id": "Dnd9VXpAjEGXiRGBf1O6"},
+    {"name": "Adam (Nam - Free API)", "id": "pNInz6obpgDQGcFmaJgB"},
 ]
+
+def load_elevenlabs_voices() -> List[dict]:
+    p = Path("config/elevenlabs_voices.json")
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, list) and len(data) > 0:
+                return data
+        except Exception:
+            pass
+    save_elevenlabs_voices(DEFAULT_ELEVENLABS_VOICES)
+    return [dict(item) for item in DEFAULT_ELEVENLABS_VOICES]
+
+def save_elevenlabs_voices(voices: List[dict]) -> None:
+    p = Path("config/elevenlabs_voices.json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(voices, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def fetch_elevenlabs_voice_name(voice_id: str, api_key: str = "") -> str:
+    """Fetch official voice name from ElevenLabs API given a Voice ID."""
+    clean_id = (voice_id or "").strip()
+    if not clean_id:
+        return ""
+
+    key = (api_key or os.getenv("ELEVENLABS_API_KEY") or getattr(CONFIG, "elevenlabs_api_key", "") or "").strip()
+    headers = {}
+    if key and key.startswith("sk_"):
+        headers["xi-api-key"] = key
+
+    try:
+        url = f"https://api.elevenlabs.io/v1/voices/{clean_id}"
+        resp = requests.get(url, headers=headers, timeout=6)
+        if resp.status_code == 200:
+            data = resp.json()
+            name = data.get("name")
+            if name:
+                labels = data.get("labels") or {}
+                gender = labels.get("gender") or ""
+                desc = f" ({gender.capitalize()})" if gender else ""
+                return f"{name}{desc}"
+    except Exception:
+        pass
+
+    try:
+        url = f"https://api.elevenlabs.io/v1/shared-voices?search={clean_id}"
+        resp = requests.get(url, headers=headers, timeout=6)
+        if resp.status_code == 200:
+            voices = resp.json().get("voices", [])
+            for v in voices:
+                if v.get("voice_id") == clean_id and v.get("name"):
+                    return str(v.get("name"))
+    except Exception:
+        pass
+
+    return f"Giọng ElevenLabs"
+
+
 _LANGUAGES = ["Tiếng Việt", "Tiếng Anh"]
+
+
+class VoiceManagerDialog(ctk.CTkToplevel):
+    def __init__(self, parent: ctk.CTk, on_voices_updated):
+        super().__init__(parent)
+        self.title("⚙️ Quản Lý Giọng Đọc ElevenLabs")
+        self.geometry("520x460")
+        self.resizable(False, False)
+        self.configure(fg_color=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+
+        self._on_voices_updated = on_voices_updated
+        self._voices_data = load_elevenlabs_voices()
+
+        hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BG_CARD_BORDER)
+        hdr.pack(fill="x", padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            hdr,
+            text="⚙️ Quản Lý Giọng Đọc ElevenLabs",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", padx=14, pady=10)
+
+        # Top section: Add voice by ID
+        add_frame = ctk.CTkFrame(self, fg_color=BG_SUB_CARD, corner_radius=8, border_width=1, border_color=BG_CARD_BORDER)
+        add_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        ctk.CTkLabel(
+            add_frame,
+            text="➕ Thêm Giọng Mới (Dán ElevenLabs Voice ID):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+
+        input_row = ctk.CTkFrame(add_frame, fg_color="transparent")
+        input_row.pack(fill="x", padx=12, pady=(0, 10))
+
+        self._id_entry = ctk.CTkEntry(
+            input_row,
+            placeholder_text="Dán Voice ID vào đây (ví dụ: pNInz6obpgDQGcFmaJgB)...",
+            fg_color=BG_INPUT,
+            border_color=BORDER_INPUT,
+            height=32,
+            corner_radius=6,
+        )
+        self._id_entry.pack(side="left", expand=True, fill="x", padx=(0, 8))
+
+        self._btn_add = ctk.CTkButton(
+            input_row,
+            text="⚡ Thêm Giọng",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+            height=32,
+            width=110,
+            corner_radius=6,
+            command=self._on_add_voice,
+        )
+        self._btn_add.pack(side="right")
+
+        # Main section: List of voices with Delete button for each
+        ctk.CTkLabel(
+            self,
+            text="📋 Danh sách giọng đọc hiện tại (Nhấn Xóa để gỡ giọng):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", padx=20, pady=(4, 4))
+
+        self._scroll_frame = ctk.CTkScrollableFrame(
+            self,
+            fg_color=BG_SUB_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=BG_CARD_BORDER,
+        )
+        self._scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+
+        # Bottom Close Button
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 16))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Đóng",
+            font=ctk.CTkFont(size=12),
+            fg_color=ACCENT_SLATE,
+            hover_color=ACCENT_SLATE_HOVER,
+            height=32,
+            width=100,
+            corner_radius=6,
+            command=self.destroy,
+        ).pack(side="right")
+
+        self._render_voice_list()
+
+    def _render_voice_list(self) -> None:
+        for child in self._scroll_frame.winfo_children():
+            child.destroy()
+
+        for item in self._voices_data:
+            v_name = item.get("name", "Unknown Voice")
+            v_id = item.get("id", "")
+
+            row = ctk.CTkFrame(self._scroll_frame, fg_color=BG_CARD, corner_radius=6)
+            row.pack(fill="x", pady=3, padx=2)
+
+            lbl = ctk.CTkLabel(
+                row,
+                text=f"🎙️  {v_name}",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=TEXT_PRIMARY,
+                anchor="w",
+            )
+            lbl.pack(side="left", padx=10, pady=8, expand=True, fill="x")
+
+            btn_del = ctk.CTkButton(
+                row,
+                text="🗑️ Xóa",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color="#ef4444",
+                hover_color="#dc2626",
+                height=26,
+                width=55,
+                corner_radius=4,
+                command=lambda vid=v_id, vname=v_name: self._on_delete_item(vid, vname),
+            )
+            btn_del.pack(side="right", padx=6, pady=4)
+
+    def _on_add_voice(self) -> None:
+        voice_id = self._id_entry.get().strip()
+        if not voice_id:
+            messagebox.showwarning("Cảnh báo", "Vui lòng dán ElevenLabs Voice ID!")
+            return
+
+        self._btn_add.configure(state="disabled", text="⏳ Đang tra...")
+
+        def _worker():
+            fetched_name = fetch_elevenlabs_voice_name(voice_id)
+            display_name = fetched_name.strip() or f"Giọng {voice_id}"
+
+            def _done():
+                found = False
+                for v in self._voices_data:
+                    if v.get("id") == voice_id:
+                        v["name"] = display_name
+                        found = True
+                        break
+                if not found:
+                    self._voices_data.append({"name": display_name, "id": voice_id})
+
+                save_elevenlabs_voices(self._voices_data)
+                self._id_entry.delete(0, "end")
+                self._btn_add.configure(state="normal", text="⚡ Thêm Giọng")
+                self._render_voice_list()
+                self._on_voices_updated(display_name)
+
+            self.after(0, _done)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_delete_item(self, voice_id: str, voice_name: str) -> None:
+        if len(self._voices_data) <= 1:
+            messagebox.showwarning("Cảnh báo", "Không thể xóa giọng cuối cùng trong danh sách!")
+            return
+
+        confirm = messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc muốn xóa giọng đọc:\n'{voice_name}'?")
+        if confirm:
+            self._voices_data = [v for v in self._voices_data if v.get("id") != voice_id]
+            save_elevenlabs_voices(self._voices_data)
+            self._render_voice_list()
+            self._on_voices_updated()
 
 _SAMPLE_STYLE_MAP = {
     "🎭 Review Triệu View (Hài hước, Châm biếm, 'Anh em')": "viral_trieu_view",
@@ -88,6 +322,119 @@ _SAMPLE_STYLE_MAP = {
     "📖 Thuyết Minh Chuẩn Mực (Tài liệu, Truyền cảm)": "documentary_chuan_muc",
     "📁 Kịch bản mẫu tùy chỉnh từ file (.txt)...": "custom_file",
 }
+
+DEFAULT_JOB1_PROMPT = (
+    "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO\n"
+    "Vai trò: Quan sát video và cung cấp thông tin hình ảnh chính xác cho người viết content.\n"
+    "Hãy mô tả chi tiết: Mô tả diễn biến, Nhân vật xuất hiện, Hành động chính, Khoảnh khắc đắt giá nhất, "
+    "Biểu cảm và ngôn ngữ cơ thể, Mối tương tác trong cảnh, Bối cảnh, Yếu tố an toàn, "
+    "Thông tin chưa chắc chắn, Thời lượng cảnh."
+)
+
+DEFAULT_JOB2_PROMPT = (
+    "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
+    "Vai trò: Chuyên gia viết lời bình tiếng Anh ngắn (10-25 từ) cho video thú cưng & động vật.\n"
+    "Cảm xúc: Warm humor hoặc Adorable curiosity.\n"
+    "Chỉ xuất ra 1 câu lời bình hoàn chỉnh, không giải thích, không tiêu đề."
+)
+
+
+class PromptEditorDialog(ctk.CTkToplevel):
+    def __init__(self, parent: ctk.CTk, job_title: str, default_text: str, current_text: str, on_save_callback):
+        super().__init__(parent)
+        self.title(f"✏️ Sửa Prompt — {job_title}")
+        self.geometry("780x580")
+        self.minsize(680, 480)
+        self.configure(fg_color=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+
+        self._default_text = default_text
+        self._on_save_callback = on_save_callback
+
+        # Header
+        hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BG_CARD_BORDER)
+        hdr.pack(fill="x", padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            hdr,
+            text=f"📝 Chỉnh Sửa System Prompt: {job_title}",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", padx=14, pady=10)
+
+        # Guidance Label
+        ctk.CTkLabel(
+            self,
+            text="💡 Nhập nội dung Prompt chỉ đạo bên dưới. Prompt này sẽ được hệ thống gửi tự động tới AI Engine.",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            anchor="w",
+        ).pack(fill="x", padx=18, pady=(0, 6))
+
+        # Textbox
+        self._textbox = ctk.CTkTextbox(
+            self,
+            font=ctk.CTkFont(size=12),
+            fg_color=BG_INPUT,
+            border_width=1,
+            border_color=BORDER_INPUT,
+            corner_radius=8,
+            wrap="word",
+        )
+        self._textbox.pack(fill="both", expand=True, padx=16, pady=4)
+        self._textbox.insert("1.0", current_text or "")
+
+        # Action Buttons Bar
+        btn_bar = ctk.CTkFrame(self, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=16, pady=(10, 16))
+
+        btn_reset = ctk.CTkButton(
+            btn_bar,
+            text="🔄 Khôi Phục Mặc Định",
+            fg_color="#475569",
+            hover_color="#334155",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=34,
+            corner_radius=6,
+            command=self._on_reset,
+        )
+        btn_reset.pack(side="left")
+
+        btn_cancel = ctk.CTkButton(
+            btn_bar,
+            text="❌ Hủy",
+            fg_color="#dc2626",
+            hover_color="#b91c1c",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=34,
+            width=90,
+            corner_radius=6,
+            command=self.destroy,
+        )
+        btn_cancel.pack(side="right", padx=(8, 0))
+
+        btn_save = ctk.CTkButton(
+            btn_bar,
+            text="💾 Lưu Prompt",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            width=130,
+            corner_radius=6,
+            command=self._on_save,
+        )
+        btn_save.pack(side="right")
+
+    def _on_reset(self) -> None:
+        self._textbox.delete("1.0", "end")
+        self._textbox.insert("1.0", self._default_text)
+
+    def _on_save(self) -> None:
+        text = self._textbox.get("1.0", "end-1c").strip()
+        self._on_save_callback(text)
+        self.destroy()
 
 _PRESET_PROMPTS = {
     "-- Chọn mẫu yêu cầu nhanh --": "",
@@ -152,8 +499,8 @@ class MainWindow(ctk.CTk):
         super().__init__()
 
         self.title("AI Movie Review Studio v3.0 — Professional Studio Pipeline")
-        self.geometry("1020x720")
-        self.minsize(920, 640)
+        self.geometry("1030x745")
+        self.minsize(940, 680)
         self.configure(fg_color=BG_MAIN)
 
         # Threading & State
@@ -174,6 +521,24 @@ class MainWindow(ctk.CTk):
         self._eleven_key_var = ctk.StringVar(value=os.getenv("ELEVENLABS_API_KEY", ""))
         self._eleven_voice_id_var = ctk.StringVar(value="")
         self._debug_var = ctk.BooleanVar(value=False)
+
+        # Load Job Prompts (TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO & TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP)
+        self._p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
+        self._p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
+        self._prompt_job1 = self._p1_file.read_text(encoding="utf-8").strip() if self._p1_file.exists() else DEFAULT_JOB1_PROMPT
+        self._prompt_job2 = self._p2_file.read_text(encoding="utf-8").strip() if self._p2_file.exists() else DEFAULT_JOB2_PROMPT
+
+        # Auto save default files if they do not exist yet
+        if not self._p1_file.exists() and self._prompt_job1:
+            try:
+                self._p1_file.write_text(self._prompt_job1, encoding="utf-8")
+            except Exception:
+                pass
+        if not self._p2_file.exists() and self._prompt_job2:
+            try:
+                self._p2_file.write_text(self._prompt_job2, encoding="utf-8")
+            except Exception:
+                pass
 
         self._build_ui()
         self._poll_log_queue()
@@ -245,15 +610,6 @@ class MainWindow(ctk.CTk):
             text_color=TEXT_MUTED,
         ).pack(side="left", padx=20)
 
-        # Right quick backend indicator
-        self._lbl_hdr_status = ctk.CTkLabel(
-            header_card,
-            text="● Sẵn sàng",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=ACCENT_GREEN,
-        )
-        self._lbl_hdr_status.pack(side="right", padx=16)
-
     def _build_left_column(self, parent: ctk.CTkFrame) -> None:
         """Left Column: Video Source, Thumbnail & Technical Metadata."""
         left_card = ctk.CTkFrame(
@@ -298,34 +654,21 @@ class MainWindow(ctk.CTk):
         )
         self._thumb_label.pack(expand=True)
 
-        # Browse Video Buttons (Clips Folder or Single File)
+        # Browse Video Clips Folder Button
         btn_box = ctk.CTkFrame(left_card, fg_color="transparent")
         btn_box.pack(fill="x", padx=16, pady=(0, 6))
-        btn_box.grid_columnconfigure((0, 1), weight=1)
 
         self._btn_browse_folder = ctk.CTkButton(
             btn_box,
-            text="🎬 Chọn Thư Mục Clips (10-30s)",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=30,
+            text="📂 Chọn Thư Mục Video Clips",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=32,
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             corner_radius=8,
             command=self.browse_clip_folder,
         )
-        self._btn_browse_folder.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-
-        self._btn_browse_vid = ctk.CTkButton(
-            btn_box,
-            text="📹 Chọn 1 File Video",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            height=30,
-            fg_color=ACCENT_BLUE,
-            hover_color=ACCENT_BLUE_HOVER,
-            corner_radius=8,
-            command=self.browse_video,
-        )
-        self._btn_browse_vid.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self._btn_browse_folder.pack(fill="x", expand=True)
 
         # Metadata Card Grid
         meta_container = ctk.CTkFrame(
@@ -535,7 +878,7 @@ class MainWindow(ctk.CTk):
         self._btn_test_gemini.pack(side="left", expand=True, fill="x")
 
         # -------------------------------------------------------------
-        # Section 2: Custom Prompt Directives (Optional)
+        # Section 2: Quản Lý Prompt Công Việc (Công Việc 1 & Công Việc 2)
         # -------------------------------------------------------------
         style_card = ctk.CTkFrame(
             right_card,
@@ -552,30 +895,88 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(
             hdr_style,
-            text="📝 Yêu Cầu Prompt Bổ Sung (Tùy Chọn):",
+            text="📝 Quản Lý Prompt Công Việc (System Prompts):",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=TEXT_ACCENT,
         ).pack(side="left")
 
-        # Custom Prompt Directives Box
-        self._custom_prompt_box = ctk.CTkTextbox(
-            style_card,
-            height=38,
-            font=ctk.CTkFont(size=11),
-            fg_color=BG_INPUT,
-            border_width=1,
-            border_color=BORDER_INPUT,
-            corner_radius=6,
-        )
-        self._custom_prompt_box.pack(fill="x", padx=12, pady=(2, 2))
+        # Container chứa 2 công việc
+        jobs_box = ctk.CTkFrame(style_card, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_INPUT)
+        jobs_box.pack(fill="x", padx=12, pady=(2, 4))
+
+        # --- Hàng Công việc 1 ---
+        j1_row = ctk.CTkFrame(jobs_box, fg_color="transparent")
+        j1_row.pack(fill="x", padx=10, pady=(6, 3))
 
         ctk.CTkLabel(
-            style_card,
-            text="💡 Để trống nếu dùng Prompt mặc định chuẩn. Nhập vào nếu muốn yêu cầu phong cách riêng.",
-            font=ctk.CTkFont(size=10),
-            text_color=TEXT_MUTED,
+            j1_row,
+            text="🎬 Công việc 1 (Mô tả Video):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+            width=180,
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 4))
+        ).pack(side="left")
+
+        self._lbl_job1_status = ctk.CTkLabel(
+            j1_row,
+            text="Đang kiểm tra...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f59e0b",
+        )
+        self._lbl_job1_status.pack(side="left", padx=8)
+
+        btn_edit_j1 = ctk.CTkButton(
+            j1_row,
+            text="✏️ Sửa Công việc 1",
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            width=140,
+            corner_radius=6,
+            command=self._on_edit_job1_prompt,
+        )
+        btn_edit_j1.pack(side="right")
+
+        # Đường kẻ phân cách
+        div = ctk.CTkFrame(jobs_box, fg_color="#1e293b", height=1)
+        div.pack(fill="x", padx=8, pady=2)
+
+        # --- Hàng Công việc 2 ---
+        j2_row = ctk.CTkFrame(jobs_box, fg_color="transparent")
+        j2_row.pack(fill="x", padx=10, pady=(3, 6))
+
+        ctk.CTkLabel(
+            j2_row,
+            text="✍️ Công việc 2 (Viết Content):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+            width=180,
+            anchor="w",
+        ).pack(side="left")
+
+        self._lbl_job2_status = ctk.CTkLabel(
+            j2_row,
+            text="Đang kiểm tra...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f59e0b",
+        )
+        self._lbl_job2_status.pack(side="left", padx=8)
+
+        btn_edit_j2 = ctk.CTkButton(
+            j2_row,
+            text="✏️ Sửa Công việc 2",
+            fg_color="#10b981",
+            hover_color="#059669",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            width=140,
+            corner_radius=6,
+            command=self._on_edit_job2_prompt,
+        )
+        btn_edit_j2.pack(side="right")
+
+        self._update_job_prompt_statuses()
 
         # -------------------------------------------------------------
         # Section 3: TTS Voices
@@ -595,10 +996,41 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(
             hdr_tts,
-            text="🎙️ Giọng Đọc (TTS) & Studio Voice:",
+            text="🎙️ Giọng Đọc:",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=TEXT_ACCENT,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 6))
+
+        self._voices_data = load_elevenlabs_voices()
+        voice_names = [v["name"] for v in self._voices_data]
+
+        self._voice_var = ctk.StringVar(value=voice_names[0] if voice_names else "")
+        self._voice_menu = ctk.CTkOptionMenu(
+            hdr_tts,
+            variable=self._voice_var,
+            values=voice_names,
+            width=180,
+            height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="#1e293b",
+            button_color=ACCENT_BLUE,
+            button_hover_color=ACCENT_BLUE_HOVER,
+            command=self._on_voice_changed,
+        )
+        self._voice_menu.pack(side="left", padx=(0, 4))
+
+        self._btn_manage_voices = ctk.CTkButton(
+            hdr_tts,
+            text="⚙️ Quản Lý Giọng",
+            fg_color="#10b981",
+            hover_color="#059669",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            width=115,
+            corner_radius=6,
+            command=self._on_open_voice_manager,
+        )
+        self._btn_manage_voices.pack(side="left", padx=(0, 4))
 
         self._btn_batch_tts = ctk.CTkButton(
             hdr_tts,
@@ -606,39 +1038,25 @@ class MainWindow(ctk.CTk):
             fg_color="#059669",
             hover_color="#047857",
             font=ctk.CTkFont(size=11, weight="bold"),
-            height=24,
-            width=135,
+            height=26,
+            width=125,
             corner_radius=6,
             command=self._on_batch_sheet_tts,
         )
-        self._btn_batch_tts.pack(side="right", padx=(6, 0))
+        self._btn_batch_tts.pack(side="right", padx=(2, 0))
 
         self._btn_eleven_key = ctk.CTkButton(
             hdr_tts,
-            text="🔑 Nhập API Key ElevenLabs",
+            text="🔑 API",
             fg_color="#8b5cf6",
             hover_color="#7c3aed",
             font=ctk.CTkFont(size=11, weight="bold"),
-            height=24,
-            width=175,
+            height=26,
+            width=65,
             corner_radius=6,
             command=self._on_input_elevenlabs_key,
         )
-        self._btn_eleven_key.pack(side="right", padx=(6, 0))
-
-        self._voice_var = ctk.StringVar(value=_VOICE_OPTIONS[0])
-        ctk.CTkOptionMenu(
-            hdr_tts,
-            variable=self._voice_var,
-            values=_VOICE_OPTIONS,
-            width=240,
-            height=24,
-            font=ctk.CTkFont(size=11),
-            fg_color="#1e293b",
-            button_color=ACCENT_BLUE,
-            button_hover_color=ACCENT_BLUE_HOVER,
-            command=self._on_voice_changed,
-        ).pack(side="right")
+        self._btn_eleven_key.pack(side="right", padx=(2, 0))
 
         # -------------------------------------------------------------
         # Section 4: Google Sheets Sync & Structured Analysis Export
@@ -666,8 +1084,6 @@ class MainWindow(ctk.CTk):
             text_color=TEXT_ACCENT,
         ).pack(side="left")
 
-
-
         ctk.CTkButton(
             hdr_sheet,
             text="ℹ Apps Script Setup",
@@ -680,7 +1096,7 @@ class MainWindow(ctk.CTk):
         ).pack(side="right")
 
         sheet_url_row = ctk.CTkFrame(sheet_card, fg_color="transparent")
-        sheet_url_row.pack(fill="x", padx=12, pady=(0, 4))
+        sheet_url_row.pack(fill="x", padx=12, pady=(0, 6))
         sheet_url_row.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
@@ -688,6 +1104,8 @@ class MainWindow(ctk.CTk):
             text="Webhook URL:",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=TEXT_SECONDARY,
+            width=100,
+            anchor="w",
         ).grid(row=0, column=0, sticky="w", padx=(0, 6))
 
         self._sheet_webhook_var = ctk.StringVar(value=os.getenv("GOOGLE_SHEET_WEBHOOK_URL", ""))
@@ -697,7 +1115,8 @@ class MainWindow(ctk.CTk):
             placeholder_text="https://script.google.com/macros/s/.../exec",
             fg_color=BG_INPUT,
             border_color=BORDER_INPUT,
-            height=24,
+            height=28,
+            corner_radius=6,
         )
         self._sheet_webhook_entry.grid(row=0, column=1, sticky="ew")
 
@@ -719,7 +1138,9 @@ class MainWindow(ctk.CTk):
             text="📁 Thư mục xuất voice:",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=TEXT_SECONDARY,
-        ).grid(row=0, column=0, sticky="w", padx=(12, 6), pady=4)
+            width=140,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=(12, 6), pady=6)
 
         self._output_var = ctk.StringVar(value=str(Path("data/output_voices").resolve()))
         out_entry = ctk.CTkEntry(
@@ -727,19 +1148,22 @@ class MainWindow(ctk.CTk):
             textvariable=self._output_var,
             fg_color=BG_INPUT,
             border_color=BORDER_INPUT,
-            height=24,
+            height=28,
+            corner_radius=6,
         )
-        out_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6), pady=4)
+        out_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6), pady=6)
 
         ctk.CTkButton(
             out_card,
             text="Chọn",
             width=60,
-            height=24,
-            fg_color=ACCENT_SLATE,
-            hover_color=ACCENT_SLATE_HOVER,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
             command=self._browse_output,
-        ).grid(row=0, column=2, padx=(0, 12), pady=4)
+        ).grid(row=0, column=2, sticky="e", padx=(0, 12), pady=6)
 
         # Initial visibility setup
         self._on_ai_engine_changed()
@@ -1016,13 +1440,16 @@ function doPost(e) {
         full_status = " | ".join(status_parts)
         if has_gemini and has_chatgpt:
             self._lbl_session_status.configure(text=full_status, text_color=ACCENT_GREEN)
-            self._lbl_hdr_status.configure(text="● 2-Tab Ready (Gemini + ChatGPT)", text_color=ACCENT_GREEN)
+            if hasattr(self, "_lbl_hdr_status"):
+                self._lbl_hdr_status.configure(text="● 2-Tab Ready (Gemini + ChatGPT)", text_color=ACCENT_GREEN)
         elif has_gemini or has_chatgpt:
             self._lbl_session_status.configure(text=full_status, text_color="#f59e0b")
-            self._lbl_hdr_status.configure(text="● Đã dán 1/2 Session", text_color="#f59e0b")
+            if hasattr(self, "_lbl_hdr_status"):
+                self._lbl_hdr_status.configure(text="● Đã dán 1/2 Session", text_color="#f59e0b")
         else:
             self._lbl_session_status.configure(text=full_status, text_color=ACCENT_RED)
-            self._lbl_hdr_status.configure(text="● Chưa dán Cookie", text_color=ACCENT_RED)
+            if hasattr(self, "_lbl_hdr_status"):
+                self._lbl_hdr_status.configure(text="● Chưa dán Cookie", text_color=ACCENT_RED)
 
     def _on_import_cookie(self) -> None:
         """Show modal dialog for pasting Gemini cookies."""
@@ -1253,6 +1680,20 @@ function doPost(e) {
             self._append_log("🔑 Đã cập nhật API Key ElevenLabs thành công!")
             messagebox.showinfo("Thành công", "Đã lưu API Key ElevenLabs thành công! ✓")
 
+    def _refresh_voice_menu(self, selected_name: Optional[str] = None) -> None:
+        self._voices_data = load_elevenlabs_voices()
+        voice_names = [v["name"] for v in self._voices_data]
+        self._voice_menu.configure(values=voice_names)
+        if selected_name and selected_name in voice_names:
+            self._voice_var.set(selected_name)
+        elif voice_names:
+            self._voice_var.set(voice_names[0])
+
+    def _on_open_voice_manager(self) -> None:
+        def _on_updated(selected_name: Optional[str] = None):
+            self._refresh_voice_menu(selected_name)
+        VoiceManagerDialog(self, _on_updated)
+
     def _on_batch_sheet_tts(self) -> None:
         """Launch Batch TTS Generator dialog to create audio files matching STT Video from Google Sheet / CSV."""
         dialog = ctk.CTkInputDialog(
@@ -1431,7 +1872,91 @@ function doPost(e) {
     # Pipeline Execution & Controls
     # ------------------------------------------------------------------
 
+    def _update_job_prompt_statuses(self) -> None:
+        """Update status badges for Job 1 and Job 2 prompts."""
+        # Job 1
+        t1 = (self._prompt_job1 or "").strip()
+        if t1:
+            self._lbl_job1_status.configure(
+                text=f"🟢 Đã nhập ({len(t1)} ký tự)",
+                text_color="#10b981",
+            )
+        else:
+            self._lbl_job1_status.configure(
+                text="🔴 Chưa nhập",
+                text_color="#ef4444",
+            )
+
+        # Job 2
+        t2 = (self._prompt_job2 or "").strip()
+        if t2:
+            self._lbl_job2_status.configure(
+                text=f"🟢 Đã nhập ({len(t2)} ký tự)",
+                text_color="#10b981",
+            )
+        else:
+            self._lbl_job2_status.configure(
+                text="🔴 Chưa nhập",
+                text_color="#ef4444",
+            )
+
+    def _on_edit_job1_prompt(self) -> None:
+        def _save_j1(new_text: str) -> None:
+            self._prompt_job1 = new_text
+            try:
+                self._p1_file.write_text(new_text, encoding="utf-8")
+            except Exception:
+                pass
+            self._update_job_prompt_statuses()
+            self._append_log("📝 Đã cập nhật Prompt Công việc 1.")
+
+        PromptEditorDialog(
+            parent=self,
+            job_title="Công Việc 1 (Quan Sát & Mô Tả Video)",
+            default_text=DEFAULT_JOB1_PROMPT,
+            current_text=self._prompt_job1 or DEFAULT_JOB1_PROMPT,
+            on_save_callback=_save_j1,
+        )
+
+    def _on_edit_job2_prompt(self) -> None:
+        def _save_j2(new_text: str) -> None:
+            self._prompt_job2 = new_text
+            try:
+                self._p2_file.write_text(new_text, encoding="utf-8")
+            except Exception:
+                pass
+            self._update_job_prompt_statuses()
+            self._append_log("📝 Đã cập nhật Prompt Công việc 2.")
+
+        PromptEditorDialog(
+            parent=self,
+            job_title="Công Việc 2 (Biên Kịch & Viết Content)",
+            default_text=DEFAULT_JOB2_PROMPT,
+            current_text=self._prompt_job2 or DEFAULT_JOB2_PROMPT,
+            on_save_callback=_save_j2,
+        )
+
     def _on_generate(self) -> None:
+        # Check Job 1 & Job 2 Prompts
+        p1_valid = bool((self._prompt_job1 or "").strip())
+        p2_valid = bool((self._prompt_job2 or "").strip())
+
+        if not p1_valid or not p2_valid:
+            missing = []
+            if not p1_valid:
+                missing.append("Công việc 1 (Mô tả Video)")
+            if not p2_valid:
+                missing.append("Công việc 2 (Viết Content)")
+            
+            err_msg = (
+                f"⚠️ CHƯA ĐỦ PROMPT CÔNG VIỆC!\n\n"
+                f"Bạn chưa nhập Prompt cho: {', '.join(missing)}.\n"
+                f"Vui lòng bấm nút '✏️ Sửa Công việc' tương ứng để nhập đầy đủ Prompt cho cả 2 công việc trước khi bắt đầu."
+            )
+            messagebox.showerror("Thiếu Prompt Công Việc", err_msg)
+            self._append_log(f"❌ Dừng thực thi: Thiếu Prompt cho {', '.join(missing)}.")
+            return
+
         video_path = None
         if self._current_video_info:
             video_path = getattr(self._current_video_info, "video_path", getattr(self._current_video_info, "path", None))
@@ -1511,6 +2036,8 @@ function doPost(e) {
                 quality_threshold=0.70,
                 review_video_engine=self._review_video_engine_var.get(),
                 write_content_engine=self._write_content_engine_var.get(),
+                prompt_job1=self._prompt_job1,
+                prompt_job2=self._prompt_job2,
             )
 
             # Instantiate TTS Provider
@@ -1539,7 +2066,7 @@ function doPost(e) {
             self._reset_ui_state()
             return
 
-        custom_instructions = self._custom_prompt_box.get("1.0", "end").strip()
+        custom_instructions = ""
 
         self._worker_thread = threading.Thread(
             target=self._run_pipeline,

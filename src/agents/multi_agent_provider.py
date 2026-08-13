@@ -61,6 +61,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         quality_threshold: float = 0.70,
         review_video_engine: str = "gemini_web",
         write_content_engine: str = "chatgpt_web",
+        prompt_job1: Optional[str] = None,
+        prompt_job2: Optional[str] = None,
     ) -> None:
         self._browser_mgr = browser_mgr
         self._openai_provider = openai_provider
@@ -68,6 +70,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         self._custom_sample_text = custom_sample_text
         self._review_video_engine = review_video_engine
         self._write_content_engine = write_content_engine
+        self._prompt_job1 = prompt_job1
+        self._prompt_job2 = prompt_job2
         self._tabs_initialized = False  # Track whether Tab 1 & Tab 2 have been setup
 
     # ------------------------------------------------------------------
@@ -118,19 +122,27 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
         p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
-        p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else (
-            "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO\n"
-            "Vai trò: Quan sát video và cung cấp thông tin hình ảnh chính xác cho người viết content.\n"
-            "Hãy mô tả chi tiết: Mô tả diễn biến, Nhân vật xuất hiện, Hành động chính, Khoảnh khắc đắt giá nhất, "
-            "Biểu cảm và ngôn ngữ cơ thể, Mối tương tác trong cảnh, Bối cảnh, Yếu tố an toàn, "
-            "Thông tin chưa chắc chắn, Thời lượng cảnh."
-        )
-        p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else (
-            "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
-            "Vai trò: Chuyên gia viết lời bình tiếng Anh ngắn (10-25 từ) cho video thú cưng & động vật.\n"
-            "Cảm xúc: Warm humor hoặc Adorable curiosity.\n"
-            "Chỉ xuất ra 1 câu lời bình hoàn chỉnh, không giải thích, không tiêu đề."
-        )
+
+        if self._prompt_job1 and self._prompt_job1.strip():
+            p1_template = self._prompt_job1.strip()
+        else:
+            p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else (
+                "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO\n"
+                "Vai trò: Quan sát video và cung cấp thông tin hình ảnh chính xác cho người viết content.\n"
+                "Hãy mô tả chi tiết: Mô tả diễn biến, Nhân vật xuất hiện, Hành động chính, Khoảnh khắc đắt giá nhất, "
+                "Biểu cảm và ngôn ngữ cơ thể, Mối tương tác trong cảnh, Bối cảnh, Yếu tố an toàn, "
+                "Thông tin chưa chắc chắn, Thời lượng cảnh."
+            )
+
+        if self._prompt_job2 and self._prompt_job2.strip():
+            p2_template = self._prompt_job2.strip()
+        else:
+            p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else (
+                "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
+                "Vai trò: Chuyên gia viết lời bình tiếng Anh ngắn (10-25 từ) cho video thú cưng & động vật.\n"
+                "Cảm xúc: Warm humor hoặc Adorable curiosity.\n"
+                "Chỉ xuất ra 1 câu lời bình hoàn chỉnh, không giải thích, không tiêu đề."
+            )
 
         # ── Tab 1: Setup Observer Role ──
         if progress_cb:
@@ -411,10 +423,16 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         custom_instructions = kwargs.get("custom_instructions") or ""
         progress_cb: Optional[Callable[[str, float], None]] = kwargs.get("progress_callback")
 
-        events = timeline_result.timeline.events
-        total_clips = len(events)
-        if total_clips == 0:
-            total_clips = 1
+        video_info = kwargs.get("video_info")
+        clips_list = getattr(video_info, "clips", []) if video_info else []
+
+        if video_info and getattr(video_info, "is_multi_clip", False) and len(video_info.clips) > 0:
+            total_clips = len(video_info.clips)
+        else:
+            events = timeline_result.timeline.events
+            total_clips = len(events)
+            if total_clips == 0:
+                total_clips = 1
 
         _logger.info("Generating per-clip review script for {} clips...", total_clips)
 
@@ -488,6 +506,30 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             clip_scripts.append(script_part)
             _logger.info("Clip {}/{} text: '{}'", clip_num, total_clips, script_part)
 
+            # ── Instantly push THIS clip's content to Google Sheet Webhook ──
+            try:
+                import re
+                stt_val = str(clip_num)
+                if clip_video_path:
+                    digits = re.findall(r'\d+', Path(clip_video_path).stem)
+                    if digits:
+                        stt_val = digits[-1]
+                
+                voice_name = f"AT-{int(stt_val):02d}.mp3" if stt_val.isdigit() else f"AT-{stt_val}.mp3"
+                sheet_webhook = kwargs.get("google_sheet_webhook_url") or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
+                
+                if sheet_webhook:
+                    from src.exporter.google_sheet_exporter import GoogleSheetExporter
+                    GoogleSheetExporter.sync_single_clip_to_sheet(
+                        stt=stt_val,
+                        content=script_part,
+                        voice_filename=voice_name,
+                        webhook_url=sheet_webhook,
+                        job_id=job_id,
+                    )
+            except Exception as live_err:
+                _logger.warning("Live push clip {} error: {}", clip_num, live_err)
+
         final_script = "\n\n".join(clip_scripts)
         total_words = len(final_script.split())
         elapsed_ms = (time.time() - start_ts) * 1000
@@ -519,8 +561,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if self._browser_mgr:
             try:
                 session_mgr = self._browser_mgr._session_mgr
-                if self._review_video_engine in ("gemini_web", "google_ai_studio") and not session_mgr.has_session_file():
-                    return Result.Err(ReviewError("❌ Chưa có Cookie Google (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
+                if self._review_video_engine == "gemini_web" and not session_mgr.has_session_file():
+                    return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Chưa có Cookie Gemini Web (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
                 if self._write_content_engine == "chatgpt_web" and not session_mgr.has_chatgpt_session():
                     return Result.Err(ReviewError("❌ [Lỗi ChatGPT Web] Chưa có Cookie ChatGPT Web (Tab 2). Vui lòng bấm '🤖 Cookie ChatGPT' để nạp cookie!"))
                 return Result.Ok(True)

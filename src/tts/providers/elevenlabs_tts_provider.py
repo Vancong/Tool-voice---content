@@ -42,7 +42,6 @@ _logger = get_logger("elevenlabs_tts")
 ELEVENLABS_VOICE_MAP = {
     "kat": "RiK8PTtVIeKKoFFTk9fg",     # Kat (Nữ Sharp Educator)
     "parker": "Dnd9VXpAjEGXiRGBf1O6",  # Parker (Nam Professional)
-    "rachel": "21m00Tcm4TlvDq8ikWAM",  # Rachel (Nữ - Free API)
     "adam": "pNInz6obpgDQGcFmaJgB",    # Adam (Nam - Free API)
 }
 
@@ -70,15 +69,36 @@ class ElevenLabsTTSProvider(BaseTTS):
         self._voice_id = self._resolve_voice_id(voice_id or getattr(config.tts, "voice_id", "RiK8PTtVIeKKoFFTk9fg"))
 
     def _resolve_voice_id(self, voice_name_or_id: str) -> str:
-        """Resolve voice name/alias to ElevenLabs Voice ID."""
+        """Resolve voice name/alias or formatted string to ElevenLabs Voice ID."""
         clean = (voice_name_or_id or "").strip()
+        if not clean:
+            return "RiK8PTtVIeKKoFFTk9fg"
+
+        # 1. Extract Voice ID inside parentheses at the end if present, e.g. "Giọng Nam (pNInz6obpgDQGcFmaJgB)"
+        match = re.search(r"\(([\w\-]+)\)\s*$", clean)
+        if match:
+            return match.group(1)
+
+        # 2. Check built-in map
         lowered = clean.lower()
         if lowered in ELEVENLABS_VOICE_MAP:
             return ELEVENLABS_VOICE_MAP[lowered]
         for k, v in ELEVENLABS_VOICE_MAP.items():
             if k in lowered:
                 return v
-        return clean or "RiK8PTtVIeKKoFFTk9fg"
+
+        # 3. Check saved custom voices configuration
+        voice_file = Path("config/elevenlabs_voices.json")
+        if voice_file.exists():
+            try:
+                custom_voices = json.loads(voice_file.read_text(encoding="utf-8"))
+                for item in custom_voices:
+                    if item.get("name") == clean or item.get("id") == clean:
+                        return item.get("id", clean)
+            except Exception:
+                pass
+
+        return clean
 
     @classmethod
     def save_cookie_state(cls, raw_input: str) -> bool:

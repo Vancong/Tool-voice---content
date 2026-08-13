@@ -474,6 +474,7 @@ class WorkflowEngine:
                         sample_style=sample_style,
                         custom_sample_text=custom_sample_text,
                         video_info=video_info,
+                        google_sheet_webhook_url=google_sheet_webhook_url,
                         progress_callback=lambda st, p: _notify(f"ReviewGenerator ({st})", 0.75 + p * 0.1),
                     ),
                     provider_obj=self._review_generator,
@@ -483,18 +484,18 @@ class WorkflowEngine:
                 review_result = r_review.unwrap()
             self._save_checkpoint(job_id, "ReviewGenerator", review_result)
 
-        # Automatically export and sync to Google Sheet
+        # Automatically export local CSV (live per-clip sync already pushed to Google Sheet Webhook)
         try:
             from src.exporter.google_sheet_exporter import GoogleSheetExporter
             GoogleSheetExporter.sync_to_sheet(
                 job_id=job_id,
                 timeline=timeline_result,
                 review_text=review_result.script,
-                webhook_url=google_sheet_webhook_url,
+                webhook_url=None,  # Live per-clip sync already handles Google Sheet webhook push
                 video_info=video_info,
             )
         except Exception as exc:
-            log.warning("Google Sheet export warning: {}", exc)
+            log.warning("Google Sheet local CSV export warning: {}", exc)
 
         _notify("ReviewGenerator", 0.85)
 

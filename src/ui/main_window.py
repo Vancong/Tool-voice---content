@@ -339,6 +339,132 @@ DEFAULT_JOB2_PROMPT = (
 )
 
 
+class ClipTitlesDialog(ctk.CTkToplevel):
+    """Modal dialog to enter/edit custom titles/topics for each video clip."""
+
+    def __init__(
+        self,
+        parent: ctk.CTk,
+        clips: list[Path],
+        current_titles: dict[str, str],
+        on_save_callback: Callable[[dict[str, str]], None],
+    ):
+        super().__init__(parent)
+        self.title("🏷️ Quản Lý Tiêu Đề / Chủ Đề Cho Từng Video Clip")
+        self.geometry("740x560")
+        self.minsize(640, 440)
+        self.configure(fg_color=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+
+        self._clips = clips
+        self._on_save_callback = on_save_callback
+        self._entries: dict[str, ctk.CTkEntry] = {}
+
+        # Header Card
+        hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BG_CARD_BORDER)
+        hdr.pack(fill="x", padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            hdr,
+            text=f"🏷️ Tiêu Đề / Chủ Đề Riêng Cho {len(clips)} Video Clips",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", padx=14, pady=10)
+
+        # Guidance text
+        ctk.CTkLabel(
+            self,
+            text="💡 Nhập tiêu đề hoặc ghi chú nội dung riêng cho từng video clip bên dưới để hỗ trợ AI phân tích chính xác nhất.",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            wraplength=700,
+            justify="left",
+        ).pack(fill="x", padx=18, pady=(0, 8))
+
+        # Scrollable Frame containing clip title entries
+        scroll = ctk.CTkScrollableFrame(
+            self,
+            fg_color=BG_SUB_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=BG_CARD_BORDER,
+        )
+        scroll.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+        for idx, clip_path in enumerate(clips, 1):
+            row = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=6, border_width=1, border_color=BORDER_INPUT)
+            row.pack(fill="x", padx=6, pady=4)
+            row.grid_columnconfigure(1, weight=1)
+
+            # Clip Label
+            lbl_text = f"🎬 Clip #{idx:02d}: {clip_path.name}"
+            ctk.CTkLabel(
+                row,
+                text=lbl_text,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=TEXT_ACCENT,
+                anchor="w",
+                width=220,
+            ).grid(row=0, column=0, sticky="w", padx=10, pady=8)
+
+            # Title Input Entry
+            entry = ctk.CTkEntry(
+                row,
+                placeholder_text=f"Nhập tiêu đề / chủ đề cho Clip #{idx}...",
+                font=ctk.CTkFont(size=11),
+                fg_color=BG_INPUT,
+                border_color=BORDER_INPUT,
+                height=30,
+                corner_radius=6,
+            )
+            entry.grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=8)
+
+            # Pre-fill if title exists
+            existing_val = current_titles.get(clip_path.name, "")
+            if existing_val:
+                entry.insert(0, existing_val)
+
+            self._entries[clip_path.name] = entry
+
+        # Bottom Action Bar
+        btn_bar = ctk.CTkFrame(self, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=16, pady=(0, 16))
+
+        ctk.CTkButton(
+            btn_bar,
+            text="❌ Hủy",
+            fg_color="#dc2626",
+            hover_color="#b91c1c",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=34,
+            width=90,
+            corner_radius=6,
+            command=self.destroy,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_bar,
+            text="💾 Lưu Tiêu Đề Clips",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            width=150,
+            corner_radius=6,
+            command=self._on_save,
+        ).pack(side="right")
+
+    def _on_save(self) -> None:
+        result_titles = {}
+        for fname, entry in self._entries.items():
+            val = entry.get().strip()
+            if val:
+                result_titles[fname] = val
+        self._on_save_callback(result_titles)
+        self.destroy()
+
+
 class PromptEditorDialog(ctk.CTkToplevel):
     def __init__(self, parent: ctk.CTk, job_title: str, default_text: str, current_text: str, on_save_callback):
         super().__init__(parent)
@@ -510,6 +636,7 @@ class MainWindow(ctk.CTk):
         self._last_output_file: Optional[Path] = None
         self._last_job_id: Optional[str] = None
         self._custom_sample_text: Optional[str] = None
+        self._clip_titles: dict[str, str] = {}
 
         # Gemini Web provider & API Key / State Variables
         self._gemini_web_provider = GeminiWebProvider()
@@ -624,45 +751,45 @@ class MainWindow(ctk.CTk):
 
         # Title
         hdr_box = ctk.CTkFrame(left_card, fg_color="transparent")
-        hdr_box.pack(fill="x", padx=16, pady=(8, 4))
+        hdr_box.pack(fill="x", padx=14, pady=(6, 2))
         ctk.CTkLabel(
             hdr_box,
             text="📹 Video Nguồn",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            font=ctk.CTkFont(size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
 
         # Thumbnail Showcase Box
         self._thumb_frame = ctk.CTkFrame(
             left_card,
-            width=310,
-            height=155,
+            width=290,
+            height=130,
             fg_color=BG_INPUT,
             border_width=1,
             border_color=BORDER_INPUT,
             corner_radius=10,
         )
-        self._thumb_frame.pack(padx=16, pady=(0, 6))
+        self._thumb_frame.pack(padx=14, pady=(0, 4))
         self._thumb_frame.pack_propagate(False)
 
         self._thumb_label = ctk.CTkLabel(
             self._thumb_frame,
             text="🎞️ Chưa tải video\nNhấn 'Chọn Video Nguồn' bên dưới",
             text_color=TEXT_MUTED,
-            font=ctk.CTkFont(size=13),
+            font=ctk.CTkFont(size=12),
             justify="center",
         )
         self._thumb_label.pack(expand=True)
 
         # Browse Video Clips Folder Button
         btn_box = ctk.CTkFrame(left_card, fg_color="transparent")
-        btn_box.pack(fill="x", padx=16, pady=(0, 6))
+        btn_box.pack(fill="x", padx=14, pady=(0, 4))
 
         self._btn_browse_folder = ctk.CTkButton(
             btn_box,
             text="📂 Chọn Thư Mục Video Clips",
             font=ctk.CTkFont(size=12, weight="bold"),
-            height=32,
+            height=30,
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             corner_radius=8,
@@ -678,14 +805,14 @@ class MainWindow(ctk.CTk):
             border_color=BG_CARD_BORDER,
             corner_radius=10,
         )
-        meta_container.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        meta_container.pack(fill="x", padx=14, pady=(0, 4))
         meta_container.grid_columnconfigure(1, weight=1)
 
         meta_rows = [
             ("📁 Tên file:", "_lbl_filename", "Chưa có"),
             ("⏱ Thời lượng:", "_lbl_duration", "—"),
             ("📐 Độ phân giải:", "_lbl_resolution", "—"),
-            ("🎞 Khung hình (FPS):", "_lbl_fps", "—"),
+            ("🎞 Khung hình:", "_lbl_fps", "—"),
             ("💾 Dung lượng:", "_lbl_filesize", "—"),
         ]
 
@@ -695,18 +822,58 @@ class MainWindow(ctk.CTk):
                 text=label_text,
                 font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=TEXT_SECONDARY,
-            ).grid(row=idx, column=0, sticky="w", padx=12, pady=3)
+            ).grid(row=idx, column=0, sticky="w", padx=10, pady=1)
 
             val_label = ctk.CTkLabel(
                 meta_container,
                 text=default_val,
-                font=ctk.CTkFont(size=12, weight="bold" if idx == 1 else "normal"),
+                font=ctk.CTkFont(size=11, weight="bold" if idx == 1 else "normal"),
                 text_color=TEXT_ACCENT if idx == 1 else TEXT_PRIMARY,
                 anchor="w",
                 wraplength=170,
             )
-            val_label.grid(row=idx, column=1, sticky="w", padx=(6, 12), pady=3)
+            val_label.grid(row=idx, column=1, sticky="w", padx=(4, 10), pady=1)
             setattr(self, attr_name, val_label)
+
+        # Clip Titles Management Card
+        clip_title_card = ctk.CTkFrame(
+            left_card,
+            fg_color=BG_SUB_CARD,
+            border_width=1,
+            border_color=BG_CARD_BORDER,
+            corner_radius=10,
+        )
+        clip_title_card.pack(fill="x", padx=14, pady=(0, 6))
+
+        hdr_title_box = ctk.CTkFrame(clip_title_card, fg_color="transparent")
+        hdr_title_box.pack(fill="x", padx=10, pady=(4, 2))
+
+        ctk.CTkLabel(
+            hdr_title_box,
+            text="🏷️ Tiêu Đề Riêng Từng Clip:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left")
+
+        self._lbl_clip_titles_status = ctk.CTkLabel(
+            hdr_title_box,
+            text="Chưa nạp video",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+        )
+        self._lbl_clip_titles_status.pack(side="right")
+
+        self._btn_edit_clip_titles = ctk.CTkButton(
+            clip_title_card,
+            text="✏️ Thêm / Sửa Tiêu Đề Từng Clip",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            height=28,
+            corner_radius=6,
+            command=self._on_edit_clip_titles,
+        )
+        self._btn_edit_clip_titles.pack(fill="x", padx=10, pady=(2, 6))
 
     def _build_right_column(self, parent: ctk.CTkFrame) -> None:
         """Right Column: AI Engine, Few-Shot Style, TTS Voices, Google Sheet & Custom Prompt."""
@@ -2044,7 +2211,7 @@ function doPost(e) {
         try:
             if info.thumbnail_path and info.thumbnail_path.exists():
                 pil_img = Image.open(info.thumbnail_path)
-                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(330, 185))
+                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(290, 130))
                 self._thumb_label.configure(image=ctk_img, text="")
                 self._append_log("Đã tải thumbnail thành công.")
             else:
@@ -2052,12 +2219,58 @@ function doPost(e) {
         except Exception:
             self._thumb_label.configure(text="Lỗi hiển thị hình")
 
+        self._update_clip_titles_status()
         self._append_log("Sẵn sàng xử lý.")
 
     def _on_video_info_failed(self, err_msg: str) -> None:
         self._thumb_label.configure(text=f"Lỗi đọc video\n({err_msg})")
         self._append_log(f"❌ Lỗi đọc video: {err_msg}")
         messagebox.showerror("Lỗi đọc video", f"Không thể đọc thông tin nguồn video:\n{err_msg}")
+
+    def _update_clip_titles_status(self) -> None:
+        if not hasattr(self, "_lbl_clip_titles_status"):
+            return
+        clips = []
+        if self._current_video_info:
+            clips = getattr(self._current_video_info, "clips", [])
+            if not clips and getattr(self._current_video_info, "video_path", None):
+                clips = [self._current_video_info.video_path]
+
+        if not clips:
+            self._lbl_clip_titles_status.configure(text="Chưa nạp video", text_color=TEXT_MUTED)
+            return
+
+        filled_count = sum(1 for c in clips if self._clip_titles.get(c.name, "").strip())
+        if filled_count == 0:
+            self._lbl_clip_titles_status.configure(text=f"Chưa nhập (0/{len(clips)})", text_color="#f59e0b")
+        else:
+            self._lbl_clip_titles_status.configure(text=f"🟢 Đã nhập ({filled_count}/{len(clips)})", text_color="#10b981")
+
+    def _on_edit_clip_titles(self) -> None:
+        clips = []
+        if self._current_video_info:
+            clips = getattr(self._current_video_info, "clips", [])
+            if not clips and getattr(self._current_video_info, "video_path", None):
+                clips = [self._current_video_info.video_path]
+
+        if not clips:
+            messagebox.showwarning(
+                "Chưa nạp video",
+                "Vui lòng chọn thư mục Video Clips hoặc chọn file video trước khi thêm tiêu đề cho từng clip!",
+            )
+            return
+
+        def _save_titles(new_titles: dict[str, str]) -> None:
+            self._clip_titles = new_titles
+            self._update_clip_titles_status()
+            self._append_log(f"🏷️ Đã lưu tiêu đề riêng cho {len(new_titles)} clips.")
+
+        ClipTitlesDialog(
+            parent=self,
+            clips=clips,
+            current_titles=self._clip_titles,
+            on_save_callback=_save_titles,
+        )
 
     def _browse_output(self) -> None:
         folder = filedialog.askdirectory(title="Chọn thư mục xuất voice")

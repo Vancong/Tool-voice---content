@@ -62,6 +62,20 @@ class SessionManager:
         except Exception:
             return False
 
+    def has_claude_session(self) -> bool:
+        """Check if session state file exists and has valid Claude authentication cookies."""
+        if not self._session_path.exists():
+            return False
+        try:
+            with open(self._session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                cookies = data.get("cookies", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                claude_domains = {"claude.ai", ".claude.ai", "anthropic.com", ".anthropic.com"}
+                claude_cookies = [c for c in cookies if isinstance(c, dict) and c.get("domain", "").lower() in claude_domains]
+                return len(claude_cookies) > 0
+        except Exception:
+            return False
+
     def get_status(self) -> SessionStatus:
         """Get high-level status of session."""
         if self.has_session_file():

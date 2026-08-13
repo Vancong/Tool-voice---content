@@ -152,6 +152,45 @@ CHATGPT_NEW_CHAT_SELECTORS = [
     "button[aria-label*='New chat' i]",
 ]
 
+# Selectors for Claude Web UI (claude.ai)
+CLAUDE_INPUT_SELECTORS = [
+    "div[contenteditable='true']",
+    "p[data-placeholder]",
+    "fieldset div[contenteditable='true']",
+    "div.ProseMirror",
+    "div[role='textbox']",
+    "textarea",
+]
+
+CLAUDE_SEND_SELECTORS = [
+    "button[aria-label*='Send' i]",
+    "button[aria-label*='Gửi' i]",
+    "button:has(svg)",
+    "button.bg-accent-main-100",
+    "button[type='submit']",
+]
+
+CLAUDE_STOP_SELECTORS = [
+    "button[aria-label*='Stop' i]",
+    "button[aria-label*='Dừng' i]",
+]
+
+CLAUDE_RESPONSE_SELECTORS = [
+    "div.font-claude-message",
+    "div.grid-cols-1 .markdown",
+    "div[data-is-streaming='false']",
+    "div.prose",
+    "div.markdown",
+]
+
+CLAUDE_NEW_CHAT_SELECTORS = [
+    "a[href='/new']",
+    "button:has-text('New chat')",
+    "button:has-text('Start new chat')",
+    "a:has-text('Start new chat')",
+    "button[aria-label*='New chat' i]",
+]
+
 AISTUDIO_INPUT_SELECTORS = [
     "textarea",
     "div[contenteditable='true']",
@@ -879,6 +918,9 @@ class BrowserManager:
                     if write_content_engine == "gemini_web":
                         target_url = self._config.base_url  # https://gemini.google.com
                         domain_check = "gemini.google.com"
+                    elif write_content_engine == "claude_web":
+                        target_url = "https://claude.ai/new"
+                        domain_check = "claude.ai"
                     else:
                         target_url = "https://chatgpt.com"
                         domain_check = "chatgpt.com"
@@ -1088,6 +1130,144 @@ class BrowserManager:
                     text=last_text,
                     processing_time=elapsed,
                     model_name="chatgpt-web-playwright",
+                )
+
+            if stage_idx == 2 and write_content_engine == "claude_web":
+                # -------------------------------------------------------------
+                # STAGE 2: CLAUDE WEB WORKFLOW (claude.ai)
+                # -------------------------------------------------------------
+                _notify("Tab 2 (Claude Web: Đang mở trang...)", 0.10)
+                try:
+                    if "claude.ai" not in page.url.lower():
+                        page.goto("https://claude.ai/new", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(2.0)
+                except Exception as exc:
+                    self.save_dom_snapshot(page, f"Claude navigation failure: {exc}", job_id)
+                    raise GeminiWebNavigationError(f"Failed to load Claude Web: {exc}") from exc
+
+                # Locate Claude Chat Input
+                input_box, input_sel = self._find_element_with_fallback(
+                    page,
+                    CLAUDE_INPUT_SELECTORS,
+                    description="Claude Input",
+                    target_type="input",
+                    timeout_per_selector_ms=1200,
+                    max_retries=4,
+                )
+
+                # Check if Claude shows Log In / Sign In buttons indicating session expired
+                login_btn = page.locator("a[href*='login'], button:has-text('Log in'), button:has-text('Sign in'), button:has-text('Continue with Email')")
+                if login_btn.count() > 0 and login_btn.first.is_visible() and not input_box:
+                    self.save_dom_snapshot(page, "Claude session expired / login required", job_id)
+                    raise GeminiWebAuthError("Phiên đăng nhập Claude (Tab 2) đã hết hạn hoặc chưa đăng nhập. Vui lòng dán Cookie Claude mới!")
+
+                if not input_box:
+                    snapshot_dir = self.save_dom_snapshot(page, "Claude input not found", job_id)
+                    raise GeminiWebDOMError(f"Không tìm thấy ô nhập câu hỏi Claude. Hướng dẫn: Bấm nút 'Cookie Claude' để dán lại cookie mới. (Snapshot: {snapshot_dir})")
+
+                # Baseline count of response messages in Claude
+                baseline_count = page.locator("div.font-claude-message, div.prose, [data-is-streaming]").count()
+
+                # Type prompt into Claude
+                _notify("Tab 2 (Claude Web: Đang nhập prompt...)", 0.40)
+                try:
+                    try:
+                        input_box.focus()
+                    except Exception:
+                        pass
+                    try:
+                        input_box.click(timeout=1000)
+                    except Exception:
+                        pass
+                    page.keyboard.insert_text(prompt)
+                    time.sleep(0.3)
+                    try:
+                        page.evaluate("el => el.dispatchEvent(new Event('input', { bubbles: true }))", input_box.element_handle())
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    try:
+                        input_box.fill(prompt)
+                        time.sleep(0.3)
+                    except Exception as fill_exc:
+                        self.save_dom_snapshot(page, f"Failed typing prompt to Claude: {exc}", job_id)
+                        raise GeminiWebDOMError(f"Failed entering text into Claude input: {fill_exc}") from fill_exc
+
+                # Click Send Button for Claude
+                sent = False
+                for s_sel in [
+                    "button[aria-label*='Send' i]",
+                    "button[aria-label*='Gửi' i]",
+                    "button[type='submit']",
+                    "button.bg-accent-main-100",
+                ]:
+                    try:
+                        btn = page.locator(s_sel).first
+                        if btn.is_visible(timeout=300) and btn.is_enabled():
+                            btn.click(timeout=1000)
+                            sent = True
+                            self._logger.info("[Tab 2] Clicked Claude Send Button via '{}'", s_sel)
+                            break
+                    except Exception:
+                        continue
+
+                if not sent:
+                    self._logger.info("[Tab 2] Pressing Enter to send Claude prompt...")
+                    page.keyboard.press("Enter")
+
+                # Wait for Claude response
+                _notify("Tab 2 (Claude Web: Đang chờ phản hồi...)", 0.65)
+                time.sleep(3.0)
+
+                max_wait_start = time.time()
+                target_response = None
+
+                while time.time() - max_wait_start < 45.0:
+                    loc = page.locator("div.font-claude-message, div.prose, [data-is-streaming]")
+                    if loc.count() > baseline_count:
+                        target_response = loc.last
+                        break
+                    time.sleep(1.0)
+
+                if target_response is None:
+                    loc = page.locator("div.font-claude-message, div.prose, [data-is-streaming]")
+                    if loc.count() > 0:
+                        target_response = loc.last
+                    else:
+                        snapshot_dir = self.save_dom_snapshot(page, "Claude response timeout", job_id)
+                        raise GeminiWebTimeoutError(f"Timed out waiting for Claude response. Snapshot saved to: {snapshot_dir}")
+
+                # Stream stabilization for Claude
+                _notify("Tab 2 (Claude Web: Đang nhận kết quả...)", 0.85)
+                last_text = ""
+                stable_count = 0
+                gen_start = time.time()
+
+                while time.time() - gen_start < 120.0:
+                    try:
+                        current_text = target_response.inner_text().strip()
+                        lines = [line.strip() for line in current_text.splitlines()]
+                        filtered_lines = [l for l in lines if l not in {"Sửa", "Edit", "Copy", "Sao chép", "Retry", "Thử lại"}]
+                        current_text = "\n".join(filtered_lines).strip()
+                    except Exception:
+                        current_text = ""
+
+                    if current_text and current_text == last_text:
+                        stable_count += 1
+                        if stable_count >= 2:
+                            break
+                    else:
+                        stable_count = 0
+                        last_text = current_text
+
+                    time.sleep(0.8)
+
+                elapsed = time.time() - start_time
+                self.save_session()
+                return GeminiWebResponse(
+                    text=last_text,
+                    processing_time=elapsed,
+                    model_name="claude-web-playwright",
                 )
 
             # -------------------------------------------------------------

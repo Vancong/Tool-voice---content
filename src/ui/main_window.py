@@ -802,7 +802,7 @@ class MainWindow(ctk.CTk):
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
         )
-        rb_content_chatgpt.pack(side="left", padx=(0, 15))
+        rb_content_chatgpt.pack(side="left", padx=(0, 10))
 
         rb_content_gemini = ctk.CTkRadioButton(
             row2,
@@ -813,7 +813,18 @@ class MainWindow(ctk.CTk):
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
         )
-        rb_content_gemini.pack(side="left")
+        rb_content_gemini.pack(side="left", padx=(0, 10))
+
+        rb_content_claude = ctk.CTkRadioButton(
+            row2,
+            text="Claude Web",
+            variable=self._write_content_engine_var,
+            value="claude_web",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_claude.pack(side="left")
 
         # Gemini Web Session Bar
         self._web_session_card = ctk.CTkFrame(ai_card, fg_color="transparent")
@@ -865,9 +876,21 @@ class MainWindow(ctk.CTk):
         )
         self._btn_import_chatgpt_cookie.pack(side="left", padx=(0, 4), expand=True, fill="x")
 
+        self._btn_import_claude_cookie = ctk.CTkButton(
+            btn_action_row,
+            text="🦙 Cookie Claude",
+            fg_color="#da7756",
+            hover_color="#c86544",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            corner_radius=6,
+            command=self._on_import_claude_cookie,
+        )
+        self._btn_import_claude_cookie.pack(side="left", padx=(0, 4), expand=True, fill="x")
+
         self._btn_test_gemini = ctk.CTkButton(
             btn_action_row,
-            text="⚡ Test Kết Nối (Tab 1 & Tab 2)",
+            text="⚡ Test Kết Nối",
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             font=ctk.CTkFont(size=11, weight="bold"),
@@ -1425,6 +1448,7 @@ function doPost(e) {
         sm = self._gemini_web_provider.session_manager
         has_gemini = sm.has_session_file()
         has_chatgpt = sm.has_chatgpt_session()
+        has_claude = sm.has_claude_session()
 
         status_parts = []
         if has_gemini:
@@ -1437,15 +1461,20 @@ function doPost(e) {
         else:
             status_parts.append("ChatGPT: Chưa dán ❌")
 
+        if has_claude:
+            status_parts.append("Claude: Ready ✓")
+        else:
+            status_parts.append("Claude: Chưa dán ❌")
+
         full_status = " | ".join(status_parts)
-        if has_gemini and has_chatgpt:
+        if has_gemini and (has_chatgpt or has_claude):
             self._lbl_session_status.configure(text=full_status, text_color=ACCENT_GREEN)
             if hasattr(self, "_lbl_hdr_status"):
-                self._lbl_hdr_status.configure(text="● 2-Tab Ready (Gemini + ChatGPT)", text_color=ACCENT_GREEN)
-        elif has_gemini or has_chatgpt:
+                self._lbl_hdr_status.configure(text="● 2-Tab Ready", text_color=ACCENT_GREEN)
+        elif has_gemini or has_chatgpt or has_claude:
             self._lbl_session_status.configure(text=full_status, text_color="#f59e0b")
             if hasattr(self, "_lbl_hdr_status"):
-                self._lbl_hdr_status.configure(text="● Đã dán 1/2 Session", text_color="#f59e0b")
+                self._lbl_hdr_status.configure(text="● Đã dán 1 phần Session", text_color="#f59e0b")
         else:
             self._lbl_session_status.configure(text=full_status, text_color=ACCENT_RED)
             if hasattr(self, "_lbl_hdr_status"):
@@ -1608,7 +1637,85 @@ function doPost(e) {
             command=dialog.destroy,
         ).pack(side="right")
 
+    def _on_import_claude_cookie(self) -> None:
+        """Show modal dialog for pasting Claude Web cookies."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("🦙 Import Cookie Claude Web (Tab 2)")
+        dialog.geometry("620x440")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.focus_force()
 
+        ctk.CTkLabel(
+            dialog,
+            text="🦙 Import Cookie Claude Web (Tab 2)",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#da7756",
+        ).pack(anchor="w", padx=16, pady=(14, 4))
+
+        ctk.CTkLabel(
+            dialog,
+            text="Dán Cookie Claude của bạn vào ô bên dưới (Hỗ trợ dạng JSON từ Cookie-Editor/EditThisCookie hoặc dạng text Header):",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            wraplength=580,
+            justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        txt_cookie = ctk.CTkTextbox(
+            dialog,
+            height=240,
+            font=ctk.CTkFont(size=11),
+            fg_color=BG_INPUT,
+            border_width=1,
+            border_color=BORDER_INPUT,
+            corner_radius=8,
+        )
+        txt_cookie.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+
+        def _do_save_claude():
+            raw_text = txt_cookie.get("1.0", "end").strip()
+            if not raw_text:
+                messagebox.showwarning("Cảnh báo", "Vui lòng dán chuỗi Cookie Claude trước khi lưu!", parent=dialog)
+                return
+
+            try:
+                # Import into session manager targeting .claude.ai
+                mgr = self._gemini_web_provider.session_manager
+                count = mgr.import_cookies_from_raw_string(raw_text, target_domain=".claude.ai")
+                if count > 0:
+                    self._gemini_web_provider.browser_manager.reload_cookies()
+                    self._refresh_gemini_status()
+                    self._append_log(f"✅ Đã import thành công {count} cookies Claude & tự động nạp vào Tab 2 trình duyệt!")
+                    messagebox.showinfo("Thành công", f"Đã lưu và nạp {count} cookies Claude thành công!\nBây giờ Tab 2 có thể tự động chạy bằng Claude Web.", parent=dialog)
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Lỗi Cookie", "Không phân tích được chuỗi Cookie Claude! Vui lòng kiểm tra lại định dạng JSON.", parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Lỗi", f"Lỗi khi import cookie Claude:\n{exc}", parent=dialog)
+
+        ctk.CTkButton(
+            btn_row,
+            text="✅ Lưu Cookie Claude",
+            fg_color="#da7756",
+            hover_color="#c86544",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=32,
+            command=_do_save_claude,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Hủy",
+            fg_color=ACCENT_SLATE,
+            hover_color=ACCENT_SLATE_HOVER,
+            font=ctk.CTkFont(size=12),
+            height=32,
+            command=dialog.destroy,
+        ).pack(side="right")
 
     def _on_clear_session(self) -> None:
         if messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa phiên đăng nhập Gemini đã lưu?"):
@@ -1618,21 +1725,31 @@ function doPost(e) {
             messagebox.showinfo("Thông báo", "Đã xóa session thành công.")
 
     def _on_test_gemini(self, auto: bool = False) -> None:
-        self._append_log("⚡ Đang kiểm tra kết nối Tab 1 (Gemini Web) và Tab 2 (ChatGPT Web)...")
+        write_engine = self._write_content_engine_var.get()
+        review_engine = self._review_video_engine_var.get()
+        t1_name = "Google AI Studio" if review_engine == "google_ai_studio" else "Gemini Web"
+        if write_engine == "claude_web":
+            t2_name = "Claude Web"
+        elif write_engine == "chatgpt_web":
+            t2_name = "ChatGPT Web"
+        else:
+            t2_name = "Gemini Web"
+
+        self._append_log(f"⚡ Đang kiểm tra kết nối Tab 1 ({t1_name}) và Tab 2 ({t2_name})...")
         self._btn_test_gemini.configure(state="disabled")
 
         def _test_task():
             try:
                 bm = self._gemini_web_provider.browser_manager
-                # Test Tab 1 (Gemini)
-                self._append_log("1️⃣ [Tab 1 - Gemini Web] Đang gửi tin nhắn thử nghiệm...")
-                resp1 = bm.send_prompt_to_stage(1, "Xin chào Gemini! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.")
-                self._append_log(f"✅ Tab 1 (Gemini Web) phản hồi: {resp1.text}")
+                # Test Tab 1
+                self._append_log(f"1️⃣ [Tab 1 - {t1_name}] Đang gửi tin nhắn thử nghiệm...")
+                resp1 = bm.send_prompt_to_stage(1, "Xin chào! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.", review_video_engine=review_engine, write_content_engine=write_engine)
+                self._append_log(f"✅ Tab 1 ({t1_name}) phản hồi: {resp1.text}")
 
-                # Test Tab 2 (ChatGPT)
-                self._append_log("2️⃣ [Tab 2 - ChatGPT Web] Đang gửi tin nhắn thử nghiệm...")
-                resp2 = bm.send_prompt_to_stage(2, "Xin chào ChatGPT! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.")
-                self._append_log(f"✅ Tab 2 (ChatGPT Web) phản hồi: {resp2.text}")
+                # Test Tab 2
+                self._append_log(f"2️⃣ [Tab 2 - {t2_name}] Đang gửi tin nhắn thử nghiệm...")
+                resp2 = bm.send_prompt_to_stage(2, "Xin chào! Trả lời ngắn gọn 1 câu để xác nhận kết nối thành công.", review_video_engine=review_engine, write_content_engine=write_engine)
+                self._append_log(f"✅ Tab 2 ({t2_name}) phản hồi: {resp2.text}")
 
                 def _done():
                     self._btn_test_gemini.configure(state="normal")
@@ -1641,8 +1758,8 @@ function doPost(e) {
                         messagebox.showinfo(
                             "Kết nối thành công ✓",
                             f"Cả 2 Tab đều kết nối thành công!\n\n"
-                            f"🔹 Tab 1 (Gemini Web): {resp1.text}\n\n"
-                            f"🟢 Tab 2 (ChatGPT Web): {resp2.text}"
+                            f"🔹 Tab 1 ({t1_name}): {resp1.text}\n\n"
+                            f"🟢 Tab 2 ({t2_name}): {resp2.text}"
                         )
                 self.after(0, _done)
             except Exception as exc:

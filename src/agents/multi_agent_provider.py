@@ -95,7 +95,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             raise ReviewError("Browser Manager chưa được khởi tạo.")
 
         tab1_label = "Google AI Studio" if self._review_video_engine == "google_ai_studio" else "Gemini Web"
-        tab2_label = "ChatGPT Web" if self._write_content_engine == "chatgpt_web" else "Gemini Web"
+        if self._write_content_engine == "claude_web":
+            tab2_label = "Claude Web"
+        elif self._write_content_engine == "chatgpt_web":
+            tab2_label = "ChatGPT Web"
+        else:
+            tab2_label = "Gemini Web"
 
         # ── Pre-flight check: Verify Authentication ──
         if progress_cb:
@@ -118,6 +123,14 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 "⚠️ Chưa có Cookie ChatGPT Web (Tab 2)!\n"
                 "Tab 2 cần Cookie ChatGPT để biên soạn kịch bản content.\n"
                 "Vui lòng bấm '🤖 Cookie ChatGPT' trên giao diện để nạp cookie!"
+            )
+
+        # 3. Check Claude Session (Tab 2) if claude_web selected
+        if self._write_content_engine == "claude_web" and not session_mgr.has_claude_session():
+            raise ReviewError(
+                "⚠️ Chưa có Cookie Claude Web (Tab 2)!\n"
+                "Tab 2 cần Cookie Claude để biên soạn kịch bản content.\n"
+                "Vui lòng bấm '🦙 Cookie Claude' trên giao diện để nạp cookie!"
             )
 
         p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
@@ -565,6 +578,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     return Result.Err(ReviewError("❌ [Lỗi Gemini Web] Chưa có Cookie Gemini Web (Tab 1). Vui lòng bấm '🍪 Cookie Gemini' để nạp cookie!"))
                 if self._write_content_engine == "chatgpt_web" and not session_mgr.has_chatgpt_session():
                     return Result.Err(ReviewError("❌ [Lỗi ChatGPT Web] Chưa có Cookie ChatGPT Web (Tab 2). Vui lòng bấm '🤖 Cookie ChatGPT' để nạp cookie!"))
+                if self._write_content_engine == "claude_web" and not session_mgr.has_claude_session():
+                    return Result.Err(ReviewError("❌ [Lỗi Claude Web] Chưa có Cookie Claude Web (Tab 2). Vui lòng bấm '🦙 Cookie Claude' để nạp cookie!"))
                 return Result.Ok(True)
             except Exception as exc:
                 return Result.Err(ReviewError(f"❌ [Lỗi Browser Session] Lỗi kiểm tra cookie: {exc}"))

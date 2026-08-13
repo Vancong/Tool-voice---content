@@ -63,6 +63,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         write_content_engine: str = "chatgpt_web",
         prompt_job1: Optional[str] = None,
         prompt_job2: Optional[str] = None,
+        clip_titles: Optional[dict[str, str]] = None,
     ) -> None:
         self._browser_mgr = browser_mgr
         self._openai_provider = openai_provider
@@ -72,6 +73,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         self._write_content_engine = write_content_engine
         self._prompt_job1 = prompt_job1
         self._prompt_job2 = prompt_job2
+        self._clip_titles = clip_titles or {}
         self._tabs_initialized = False  # Track whether Tab 1 & Tab 2 have been setup
 
     # ------------------------------------------------------------------
@@ -248,12 +250,25 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if progress_cb:
             progress_cb(f"Clip {clip_num}/{total_clips} (Tab 1: Gửi video qua {tab1_label})", base_pct + 0.01)
 
+        # Check if custom clip title exists for this video clip
+        clip_title_str = ""
+        if clip_video_path and clip_video_path.name in self._clip_titles:
+            clip_title_str = self._clip_titles[clip_video_path.name].strip()
+        elif f"clip_{clip_num}" in self._clip_titles:
+            clip_title_str = self._clip_titles[f"clip_{clip_num}"].strip()
+        elif str(clip_num) in self._clip_titles:
+            clip_title_str = self._clip_titles[str(clip_num)].strip()
+
         video_prompt = (
             f"[CLIP #{clip_num}/{total_clips}]\n"
             "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO\n"
             "Hãy quan sát kĩ video được đính kèm và cung cấp đầy đủ thông tin theo đúng định dạng "
             "của Công việc 1 đã được thiết lập."
         )
+        if clip_title_str:
+            video_prompt += f"\n\nTIÊU ĐỀ / CHỦ ĐỀ CỦA CLIP NÀY:\n{clip_title_str}"
+            _logger.info("Attached custom clip title to Tab 1 prompt (clip {}): '{}'", clip_num, clip_title_str)
+
         custom_addon = f"\n\nYÊU CẦU BỔ SUNG:\n{custom_instructions}" if custom_instructions.strip() else ""
         video_prompt += custom_addon
 
@@ -295,6 +310,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"THÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1 (Clip #{clip_num}/{total_clips}):\n"
             f"{stage1_desc}"
         )
+        if clip_title_str:
+            writer_prompt += f"\n\nTIÊU ĐỀ / CHỦ ĐỀ CLIP:\n{clip_title_str}"
         if custom_instructions.strip():
             writer_prompt += f"\n\nYÊU CẦU BỔ SUNG:\n{custom_instructions}"
 

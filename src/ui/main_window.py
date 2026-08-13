@@ -2472,6 +2472,7 @@ function doPost(e) {
                 write_content_engine=self._write_content_engine_var.get(),
                 prompt_job1=self._prompt_job1,
                 prompt_job2=self._prompt_job2,
+                clip_titles=self._clip_titles,
             )
 
             # Instantiate TTS Provider

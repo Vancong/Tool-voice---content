@@ -368,14 +368,7 @@ class TopicDialog(ctk.CTkToplevel):
             text_color=TEXT_PRIMARY,
         ).pack(side="left", padx=14, pady=10)
 
-        ctk.CTkLabel(
-            self,
-            text="💡 Nội dung chủ đề bạn nhập sẽ tự động được nối trực tiếp vào Prompt Công Việc 2 (CV2) dạng:\n'Chủ đề cần viết nội dung : ...'",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
-            wraplength=560,
-            justify="left",
-        ).pack(fill="x", padx=18, pady=(0, 8))
+
 
         self._txt_topic = ctk.CTkTextbox(
             self,

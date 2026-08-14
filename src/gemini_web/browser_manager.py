@@ -1329,8 +1329,15 @@ class BrowserManager:
                     snapshot_dir = self.save_dom_snapshot(page, "Claude input not found", job_id)
                     raise GeminiWebDOMError(f"Không tìm thấy ô nhập câu hỏi Claude. Hướng dẫn: Bấm nút 'Cookie Claude' để dán lại cookie mới. (Snapshot: {snapshot_dir})")
 
-                # Baseline count of response messages in Claude
+                # Baseline count of response messages in Claude & initial text check
                 baseline_count = page.locator("div.font-claude-message, div.prose, [data-is-streaming]").count()
+                initial_last_text = ""
+                try:
+                    loc_init = page.locator("div.font-claude-message, div.prose")
+                    if loc_init.count() > 0:
+                        initial_last_text = loc_init.last.inner_text().strip()
+                except Exception:
+                    pass
 
                 # Type prompt into Claude
                 _notify("Tab 2 (Claude Web: Đang nhập prompt...)", 0.40)
@@ -1379,57 +1386,151 @@ class BrowserManager:
                     self._logger.info("[Tab 2] Pressing Enter to send Claude prompt...")
                     page.keyboard.press("Enter")
 
-                # Wait for Claude response
+                # ── STRATEGY: Use Stop Button as the reliable generation signal ──
+                # Claude shows Stop Button while generating, hides it when done.
+                # This is immune to "Pondering" thinking animation false-positives.
                 _notify("Tab 2 (Claude Web: Đang chờ phản hồi...)", 0.65)
-                time.sleep(3.0)
 
-                max_wait_start = time.time()
-                target_response = None
+                CLAUDE_STOP_BTNS = [
+                    "button[aria-label*='Stop' i]",
+                    "button[aria-label*='Dừng' i]",
+                    "[data-testid*='stop' i]",
+                ]
 
-                while time.time() - max_wait_start < 45.0:
-                    loc = page.locator("div.font-claude-message, div.prose, [data-is-streaming]")
-                    if loc.count() > baseline_count:
-                        target_response = loc.last
+                # Step 1: Wait up to 15s for Stop Button to APPEAR (Claude started generating)
+                stop_appeared = False
+                stop_wait_start = time.time()
+                while time.time() - stop_wait_start < 15.0:
+                    for s_sel in CLAUDE_STOP_BTNS:
+                        try:
+                            if page.locator(s_sel).first.is_visible(timeout=400):
+                                stop_appeared = True
+                                self._logger.info("[Tab 2] Claude generation started (Stop Button visible)")
+                                break
+                        except Exception:
+                            pass
+                    if stop_appeared:
                         break
-                    time.sleep(1.0)
+                    time.sleep(0.5)
 
-                if target_response is None:
-                    loc = page.locator("div.font-claude-message, div.prose, [data-is-streaming]")
-                    if loc.count() > 0:
-                        target_response = loc.last
-                    else:
-                        snapshot_dir = self.save_dom_snapshot(page, "Claude response timeout", job_id)
-                        raise GeminiWebTimeoutError(f"Timed out waiting for Claude response. Snapshot saved to: {snapshot_dir}")
+                if not stop_appeared:
+                    self._logger.warning("[Tab 2] Stop Button never appeared – Claude may have replied instantly or selector changed")
 
-                # Stream stabilization for Claude
+                # Step 2: Wait up to 120s for Stop Button to DISAPPEAR (Claude finished)
                 _notify("Tab 2 (Claude Web: Đang nhận kết quả...)", 0.85)
-                last_text = ""
-                stable_count = 0
                 gen_start = time.time()
-
                 while time.time() - gen_start < 120.0:
-                    try:
-                        current_text = target_response.inner_text().strip()
-                        lines = [line.strip() for line in current_text.splitlines()]
-                        filtered_lines = [l for l in lines if l not in {"Sửa", "Edit", "Copy", "Sao chép", "Retry", "Thử lại"}]
-                        current_text = "\n".join(filtered_lines).strip()
-                    except Exception:
-                        current_text = ""
-
-                    if current_text and current_text == last_text:
-                        stable_count += 1
-                        if stable_count >= 2:
-                            break
-                    else:
-                        stable_count = 0
-                        last_text = current_text
-
+                    stop_visible = False
+                    for s_sel in CLAUDE_STOP_BTNS:
+                        try:
+                            if page.locator(s_sel).first.is_visible(timeout=300):
+                                stop_visible = True
+                                break
+                        except Exception:
+                            pass
+                    if not stop_visible:
+                        self._logger.info("[Tab 2] Claude generation complete (Stop Button gone) after {:.1f}s", time.time() - gen_start)
+                        break
                     time.sleep(0.8)
+
+                # Extra wait for DOM to settle after streaming ends
+                time.sleep(1.2)
+
+                # Step 3: Read the last Claude response container (skip "Pondering" thinking blocks)
+                CLAUDE_FINAL_SELECTORS = [
+                    "div[data-is-streaming='false'] div.prose",
+                    "div.font-claude-message div.prose",
+                    "div[data-is-streaming='false']",
+                    "div.font-claude-message",
+                ]
+                INVALID_CLAUDE_TEXTS = {
+                    "pondering", "pondering...", "thinking", "thinking...", "", "...",
+                }
+
+                last_text = ""
+                for f_sel in CLAUDE_FINAL_SELECTORS:
+                    try:
+                        loc = page.locator(f_sel)
+                        cnt = loc.count()
+                        if cnt == 0:
+                            continue
+                        # Walk backwards from last to find a real non-Pondering response
+                        for idx in range(cnt - 1, -1, -1):
+                            try:
+                                el = loc.nth(idx)
+                                t = el.inner_text().strip()
+                                lines = []
+                                for l in t.splitlines():
+                                    l_str = l.strip()
+                                    # Filter out UI controls, pondering, and auto-generated chat titles
+                                    if not l_str or l_str in {"Sửa", "Edit", "Copy", "Sao chép", "Retry", "Thử lại", "Pondering", "Pondering..."}:
+                                        continue
+                                    if "orchestrated" in l_str.lower() and "narrative" in l_str.lower():
+                                        continue
+                                    lines.append(l_str)
+                                t = "\n".join(lines).strip()
+                                if t and t.lower() not in INVALID_CLAUDE_TEXTS and t != initial_last_text and len(t) > 5:
+                                    last_text = t
+                                    self._logger.info("[Tab 2] Captured Claude final response ({} chars) via '{}'", len(last_text), f_sel)
+                                    break
+                            except Exception:
+                                continue
+                        if last_text:
+                            break
+                    except Exception:
+                        continue
+
+                # Fallback: text stabilisation if stop-button method got nothing
+                if not last_text:
+                    self._logger.warning("[Tab 2] Stop-button method returned empty – falling back to text stabilisation")
+                    stable_count = 0
+                    last_text_fb = ""
+                    fb_start = time.time()
+                    while time.time() - fb_start < 30.0:
+                        for f_sel in CLAUDE_FINAL_SELECTORS:
+                            try:
+                                loc = page.locator(f_sel)
+                                if loc.count() > 0:
+                                    t = loc.last.inner_text().strip()
+                                    lines = [l.strip() for l in t.splitlines()
+                                             if l.strip() not in {"Sửa", "Edit", "Copy", "Sao chép", "Retry", "Thử lại", "Pondering", "Pondering..."}]
+                                    t = "\n".join(lines).strip()
+                                    if t and t != initial_last_text and t.lower() not in INVALID_CLAUDE_TEXTS:
+                                        if t == last_text_fb:
+                                            stable_count += 1
+                                            if stable_count >= 3:
+                                                last_text = t
+                                                break
+                                        else:
+                                            stable_count = 0
+                                            last_text_fb = t
+                            except Exception:
+                                pass
+                        if last_text:
+                            break
+                        time.sleep(0.8)
 
                 elapsed = time.time() - start_time
                 self.save_session()
+
+                # Clean accessibility prefixes like "Claude responded:"
+                clean_text = last_text.strip()
+                for prefix in ["claude responded:", "claude responded", "claude said:", "claude:", "chatgpt responded:", "chatgpt said:", "chatgpt:"]:
+                    if clean_text.lower().startswith(prefix):
+                        clean_text = clean_text[len(prefix):].strip()
+
+                # Deduplicate repeated identical lines
+                p_lines = [p.strip() for p in clean_text.splitlines() if p.strip()]
+                unique_p = []
+                for p in p_lines:
+                    if not unique_p or p != unique_p[-1]:
+                        unique_p.append(p)
+                clean_text = "\n".join(unique_p).strip()
+
+                self._logger.info("[Tab 2] Claude Web final response ({} chars, {:.1f}s): {}", len(clean_text), elapsed, clean_text[:120])
+
                 return GeminiWebResponse(
-                    text=last_text,
+                    text=clean_text,
                     processing_time=elapsed,
                     model_name="claude-web-playwright",
                 )
@@ -1776,7 +1877,13 @@ class BrowserManager:
                 snapshot_dir = self.save_dom_snapshot(page, f"Tab {stage_idx} input box not found", job_id)
                 raise GeminiWebDOMError(f"Could not locate chat input box on Tab {stage_idx}. Snapshot: {snapshot_dir}")
 
-            _, resp_sel_initial, baseline_count = self._get_response_containers(page)
+            loc_initial, resp_sel_initial, baseline_count = self._get_response_containers(page)
+            initial_last_text = ""
+            if loc_initial is not None and baseline_count > 0:
+                try:
+                    initial_last_text = loc_initial.last.inner_text().strip()
+                except Exception:
+                    pass
 
             self._logger.info(
                 "[Tab {}] Sending prompt ({} chars, {} words) via input selector '{}'...",
@@ -1838,10 +1945,20 @@ class BrowserManager:
 
             while time.time() - max_wait_start < 45.0:
                 loc, sel, cnt = self._get_response_containers(page)
-                if loc is not None and cnt > baseline_count:
-                    active_resp_locator = loc
-                    active_resp_sel = sel
-                    break
+                if loc is not None:
+                    if cnt > baseline_count:
+                        active_resp_locator = loc
+                        active_resp_sel = sel
+                        break
+                    elif cnt > 0 and initial_last_text:
+                        try:
+                            curr_last = loc.last.inner_text().strip()
+                            if curr_last and curr_last != initial_last_text and len(curr_last) > len(initial_last_text):
+                                active_resp_locator = loc
+                                active_resp_sel = sel
+                                break
+                        except Exception:
+                            pass
                 time.sleep(1.0)
 
             if active_resp_locator is None:
@@ -1858,6 +1975,9 @@ class BrowserManager:
             stable_count = 0
             gen_start = time.time()
 
+            # Full placeholder list — genuine loading indicators AND boilerplate Gemini responses
+            # that appear when video has not been properly processed yet (clip review phase).
+            # For SETUP calls these are valid responses, so they are bypassed via is_setup_call.
             PLACEHOLDER_TEXTS = [
                 "đang phân tích",
                 "đang tạo",
@@ -1867,7 +1987,14 @@ class BrowserManager:
                 "analyzing",
                 "processing",
                 "generating",
+                "tôi đã nắm rõ",
+                "tôi sẽ tuân thủ",
+                "vui lòng tải lên video",
+                "vui lòng cung cấp",
+                "chưa có dữ liệu clip",
+                "bạn chưa tải",
             ]
+            is_setup_call = job_id and ("setup" in str(job_id).lower())
 
             while time.time() - gen_start < 120.0:
                 try:
@@ -1903,17 +2030,27 @@ class BrowserManager:
                     pass
 
                 curr_lower = current_text.lower()
-                is_placeholder = any(ph in curr_lower for ph in PLACEHOLDER_TEXTS) or (len(current_text) < 25 and is_busy)
+                # Placeholder check: only streaming/loading indicators
+                # Setup calls are always accepted regardless of content
+                is_placeholder = (
+                    not is_setup_call
+                    and (any(ph in curr_lower for ph in PLACEHOLDER_TEXTS) or (len(current_text) < 25 and is_busy))
+                )
 
-                # Only finish generation when text is stable AND browser is not busy AND not placeholder
+                # Finish when text is stable AND browser is not busy AND not a loading placeholder
                 if current_text and current_text == last_text and not is_busy and not is_placeholder:
                     stable_count += 1
-                    # If copy button is verified AND text is stable for 2 cycles, or if text is stable for 4 cycles (~2.5s)
+                    # Setup calls: accept with 2 stable cycles, no minimum length check
+                    if is_setup_call and stable_count >= 2:
+                        self._logger.info("[Tab {}] Setup response stable ({} chars, {:.1f}s)", stage_idx, len(current_text), time.time() - gen_start)
+                        last_text = current_text
+                        break
+                    # Clip calls: copy button + 2 stable, or 4 stable cycles
                     if (has_copy_btn and stable_count >= 2) or stable_count >= 4:
-                        # Extra safeguard for Stage 1 (Video Observation): wait longer if text is unexpectedly short (<200 chars)
-                        if stage_idx == 1 and len(current_text) < 200 and (time.time() - gen_start < 25.0):
-                            self._logger.info("[Tab 1] Video description text is short ({} chars), waiting to ensure full output generation...", len(current_text))
-                            time.sleep(1.5)
+                        # Extra safeguard for Stage 1 (Video): wait longer if text is short (<350 chars)
+                        if stage_idx == 1 and not is_setup_call and len(current_text) < 350 and (time.time() - gen_start < 40.0):
+                            self._logger.info("[Tab 1] Video description incomplete/short ({} chars), continuing to wait...", len(current_text))
+                            time.sleep(2.0)
                             last_text = current_text
                             continue
 

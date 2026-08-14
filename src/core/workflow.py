@@ -493,6 +493,7 @@ class WorkflowEngine:
                 review_text=review_result.script,
                 webhook_url=None,  # Live per-clip sync already handles Google Sheet webhook push
                 video_info=video_info,
+                push_webhook=False,
             )
         except Exception as exc:
             log.warning("Google Sheet local CSV export warning: {}", exc)

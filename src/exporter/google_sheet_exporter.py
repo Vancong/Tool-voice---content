@@ -34,8 +34,8 @@ function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    
-    // Nếu sheet đang trống, tạo Header đúng chuẩn 3 cột
+
+    // Ensure header row exists
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(["stt video", "nội dung mới viết", "voice"]);
       var headerRange = sheet.getRange(1, 1, 1, 3);
@@ -43,20 +43,51 @@ function doPost(e) {
       headerRange.setFontColor("#ffffff");
       headerRange.setFontWeight("bold");
     }
-    
+
     var rows = data.rows || [];
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      sheet.appendRow([
-        r.stt_video || (i + 1),
-        r.noi_dung_moi_viet || "",
-        r.voice || ""
-      ]);
+
+    // Live single-clip mode: upsert by stt_video to prevent duplicates
+    if (data.total_rows === 1 && rows.length === 1) {
+      var newStt = String(rows[0].stt_video || "");
+      var lastRow = sheet.getLastRow();
+      var found = false;
+      if (newStt && lastRow > 1) {
+        var sttCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var r = 0; r < sttCol.length; r++) {
+          if (String(sttCol[r][0]) === newStt) {
+            // Update existing row in-place
+            sheet.getRange(r + 2, 1, 1, 3).setValues([[
+              rows[0].stt_video || (r + 1),
+              rows[0].noi_dung_moi_viet || "",
+              rows[0].voice || ""
+            ]]);
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        sheet.appendRow([
+          rows[0].stt_video || "",
+          rows[0].noi_dung_moi_viet || "",
+          rows[0].voice || ""
+        ]);
+      }
+    } else {
+      // Batch mode: append all rows
+      for (var i = 0; i < rows.length; i++) {
+        var r2 = rows[i];
+        sheet.appendRow([
+          r2.stt_video || (i + 1),
+          r2.noi_dung_moi_viet || "",
+          r2.voice || ""
+        ]);
+      }
     }
-    
+
     return ContentService.createTextOutput(JSON.stringify({status: "success", count: rows.length}))
       .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
+  } catch(err) {
     return ContentService.createTextOutput(JSON.stringify({status: "error", message: err.toString()}))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -76,10 +107,12 @@ class GoogleSheetExporter:
         sheet_id: Optional[str] = None,
         output_dir: Optional[Path] = None,
         video_info: Optional[Any] = None,
+        push_webhook: bool = True,
     ) -> Dict[str, Any]:
         """Sync review data and scenes to Google Sheet and local CSV matching table format:
         [stt video, nội dung mới viết, voice]
         """
+        import os
         import re
 
         if output_dir is None:
@@ -147,9 +180,9 @@ class GoogleSheetExporter:
         except Exception:
             pass
 
-        # 2. Sync to Google Apps Script Webhook if provided
+        # 2. Sync to Google Apps Script Webhook ONLY if push_webhook is True and webhook_url is explicitly provided
         webhook_status = "not_configured"
-        webhook_target = webhook_url or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
+        webhook_target = webhook_url if (webhook_url and push_webhook) else ""
         if webhook_target and webhook_target.startswith("http"):
             if "/macros/library/" in webhook_target or "/edit" in webhook_target:
                 _logger.warning("⚠️ LỖI WEBHOOK URL: Bạn đang nhập link chỉnh sửa Apps Script ({})! Vui lòng bấm nút 'Triển khai' (Deploy) ➔ Chọn 'Ứng dụng web' và lấy link kết thúc bằng '/exec'.", webhook_target)

@@ -1589,36 +1589,8 @@ function doPost(e) {
         txt.insert("1.0", guide_text)
         txt.configure(state="disabled")
 
-        script_code = """function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["stt video", "nội dung mới viết", "voice"]);
-      var headerRange = sheet.getRange(1, 1, 1, 3);
-      headerRange.setBackground("#1e293b");
-      headerRange.setFontColor("#ffffff");
-      headerRange.setFontWeight("bold");
-    }
-    
-    var rows = data.rows || [];
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      sheet.appendRow([
-        r.stt_video || (i + 1),
-        r.noi_dung_moi_viet || "",
-        r.voice || ""
-      ]);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({status: "success", count: rows.length}))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({status: "error", message: err.toString()}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}"""
+        from src.exporter.google_sheet_exporter import GOOGLE_APPS_SCRIPT_TEMPLATE
+        script_code = GOOGLE_APPS_SCRIPT_TEMPLATE.strip()
 
         def _copy_script():
             self.clipboard_clear()

@@ -224,6 +224,45 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         self._tabs_initialized = True
 
+    def _is_valid_stage1_description(self, text: str) -> bool:
+        """Validate if Tab 1 response is a real video breakdown vs a boilerplate prompt echo/refusal."""
+        if not text or len(text.strip()) < 120:
+            return False
+        t_lower = text.lower()
+
+        # Reject boilerplate prompt echo or confirmation acknowledgements
+        invalid_keywords = [
+            "tôi đã nắm rõ",
+            "tôi sẽ tuân thủ",
+            "vui lòng tải lên video",
+            "vui lòng cung cấp",
+            "chưa có dữ liệu clip",
+            "bạn chưa tải",
+            "không có dữ liệu",
+            "mẫu khung",
+            "không thể phân tích",
+            "bạn đã dừng câu trả lời này",
+            "bạn đã dừng",
+        ]
+        for ik in invalid_keywords:
+            if ik in t_lower and len(text) < 450:
+                return False
+
+        # Require core video analysis markers
+        required_markers = [
+            "diễn biến",
+            "nhân vật",
+            "hành động",
+            "khoảnh khắc",
+            "biểu cảm",
+            "tương tác",
+            "00:",
+            "từ 00:",
+            "bản mô tả",
+        ]
+        matches = sum(1 for m in required_markers if m in t_lower)
+        return matches >= 2
+
     def _generate_for_clip_gemini_web(
         self,
         clip_idx: int,
@@ -273,33 +312,39 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         video_prompt += custom_addon
 
         stage1_desc = ""
-        try:
-            _logger.info("Tab 1 ({}): Sending video clip {}/{} → {}", tab1_label, clip_num, total_clips, clip_video_path)
-            resp1 = self._browser_mgr.send_prompt_to_stage(
-                stage_idx=1,
-                prompt=video_prompt,
-                media_path=clip_video_path,
-                job_id=f"{job_id}_clip{clip_idx}_tab1",
-                progress_callback=progress_cb,
-                review_video_engine=self._review_video_engine,
-                write_content_engine=self._write_content_engine,
-            )
-            stage1_desc = resp1.text.strip()
-            # Strip any "Gemini đã nói" / "Gemini said" prefix
-            for prefix in ["gemini đã nói", "gemini said", "gemini:"]:
-                if stage1_desc.lower().startswith(prefix):
-                    stage1_desc = stage1_desc[len(prefix):].strip()
-            stage1_desc = stage1_desc.strip('"').strip("'").strip()
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info("Tab 1 ({}): Sending video clip {}/{} (Attempt {}/{}) → {}", tab1_label, clip_num, total_clips, attempt, max_attempts, clip_video_path)
+                resp1 = self._browser_mgr.send_prompt_to_stage(
+                    stage_idx=1,
+                    prompt=video_prompt,
+                    media_path=clip_video_path,
+                    job_id=f"{job_id}_clip{clip_idx}_tab1_try{attempt}",
+                    progress_callback=progress_cb,
+                    review_video_engine=self._review_video_engine,
+                    write_content_engine=self._write_content_engine,
+                )
+                raw_desc = resp1.text.strip()
+                for prefix in ["gemini đã nói", "gemini said", "gemini:"]:
+                    if raw_desc.lower().startswith(prefix):
+                        raw_desc = raw_desc[len(prefix):].strip()
+                raw_desc = raw_desc.strip('"').strip("'").strip()
 
-            # Sanity check: ensure description is complete and not truncated
-            if len(stage1_desc) < 150:
-                _logger.warning("Tab 1 description returned short output ({} chars). Waiting 3.0s to allow Gemini to finish generation...", len(stage1_desc))
-                time.sleep(3.0)
+                if self._is_valid_stage1_description(raw_desc):
+                    stage1_desc = raw_desc
+                    _logger.info("Tab 1 valid video description obtained for clip {} ({} chars) on attempt {}!", clip_num, len(stage1_desc), attempt)
+                    break
+                else:
+                    _logger.warning("Tab 1 attempt {}/{} returned invalid/boilerplate response ({} chars): '{}...'. Retrying video prompt...", attempt, max_attempts, len(raw_desc), raw_desc[:80])
+                    time.sleep(3.0)
+            except Exception as exc:
+                _logger.warning("Tab 1 error on clip {} (Attempt {}/{}): {}", clip_num, attempt, max_attempts, exc)
+                time.sleep(2.0)
 
-            _logger.info("Tab 1 description (clip {}): {}...", clip_num, stage1_desc[:150])
-        except Exception as exc:
-            _logger.warning("Tab 1 error on clip {}: {}", clip_num, exc)
-            stage1_desc = f"Clip {clip_num}: Không thể phân tích."
+        if not stage1_desc or not self._is_valid_stage1_description(stage1_desc):
+            _logger.error("❌ Tab 1 failed to return valid video description for Clip {} after {} attempts!", clip_num, max_attempts)
+            stage1_desc = f"Clip {clip_num}: Không thể phân tích video."
 
         # ── Tab 2: Send Tab1 description, get final script ──
         if progress_cb:
@@ -326,10 +371,39 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 write_content_engine=self._write_content_engine,
             )
             txt = resp2.text.strip()
-            for prefix in ["gemini đã nói", "gemini said", "gemini:"]:
+            for prefix in [
+                "claude responded:",
+                "claude responded",
+                "claude said:",
+                "claude:",
+                "chatgpt responded:",
+                "chatgpt responded",
+                "chatgpt said:",
+                "chatgpt:",
+                "gemini đã nói:",
+                "gemini đã nói",
+                "gemini said:",
+                "gemini said",
+                "gemini:",
+            ]:
                 if txt.lower().startswith(prefix):
                     txt = txt[len(prefix):].strip()
             txt = txt.strip('"').strip("'").strip()
+            
+            # Deduplicate repeated identical lines/paragraphs and nested echos
+            p_lines = [p.strip() for p in txt.splitlines() if p.strip()]
+            unique_p = []
+            seen_set = set()
+            for p in p_lines:
+                p_normalized = p.lower().strip()
+                # Skip header/prompt echo lines if Claude echos input prompt
+                if any(k in p_normalized for k in ["thông tin đầu vào", "công việc 1", "công việc 2", "tiêu đề / chủ đề"]):
+                    continue
+                if p_normalized not in seen_set:
+                    seen_set.add(p_normalized)
+                    unique_p.append(p)
+            txt = "\n\n".join(unique_p).strip()
+
             _logger.info("Tab 2 final script (clip {}): {}", clip_num, txt)
             return txt
         except Exception as exc:

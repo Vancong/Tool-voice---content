@@ -390,18 +390,31 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     txt = txt[len(prefix):].strip()
             txt = txt.strip('"').strip("'").strip()
             
-            # Deduplicate repeated identical lines/paragraphs and nested echos
+            # Deduplicate repeated identical lines/paragraphs and nested echos/substrings
             p_lines = [p.strip() for p in txt.splitlines() if p.strip()]
             unique_p = []
-            seen_set = set()
             for p in p_lines:
                 p_normalized = p.lower().strip()
                 # Skip header/prompt echo lines if Claude echos input prompt
                 if any(k in p_normalized for k in ["thông tin đầu vào", "công việc 1", "công việc 2", "tiêu đề / chủ đề"]):
                     continue
-                if p_normalized not in seen_set:
-                    seen_set.add(p_normalized)
+                
+                # Check if this line is a prefix/substring of an existing longer line, or vice versa
+                is_sub = False
+                for idx, existing in enumerate(unique_p):
+                    ex_norm = existing.lower().strip()
+                    if p_normalized in ex_norm:
+                        is_sub = True
+                        break
+                    elif ex_norm in p_normalized:
+                        # Current line is longer and contains previous line -> replace previous line
+                        unique_p[idx] = p
+                        is_sub = True
+                        break
+                
+                if not is_sub:
                     unique_p.append(p)
+
             txt = "\n\n".join(unique_p).strip()
 
             _logger.info("Tab 2 final script (clip {}): {}", clip_num, txt)

@@ -291,9 +291,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     stage1_desc = stage1_desc[len(prefix):].strip()
             stage1_desc = stage1_desc.strip('"').strip("'").strip()
 
-            # Sanity check: ensure description is not just a placeholder indicator
-            if any(ph in stage1_desc.lower() for ph in ["đang phân tích", "đang tạo", "thinking..."]) and len(stage1_desc) < 40:
-                _logger.warning("Tab 1 description returned placeholder '{}', waiting for actual output...", stage1_desc)
+            # Sanity check: ensure description is complete and not truncated
+            if len(stage1_desc) < 150:
+                _logger.warning("Tab 1 description returned short output ({} chars). Waiting 3.0s to allow Gemini to finish generation...", len(stage1_desc))
                 time.sleep(3.0)
 
             _logger.info("Tab 1 description (clip {}): {}...", clip_num, stage1_desc[:150])

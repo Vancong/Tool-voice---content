@@ -1878,13 +1878,13 @@ class BrowserManager:
                 # Fast check if stop button or loading indicator is present
                 is_busy = False
                 try:
-                    stop_loc = page.locator("button[aria-label*='Stop' i], button[aria-label*='Dừng' i], button[aria-label*='stop' i], mat-progress-spinner, .loading-spinner")
-                    if stop_loc.count() > 0 and stop_loc.first.is_visible():
+                    stop_loc = page.locator("button[aria-label*='Stop' i], button[aria-label*='Dừng' i], button[aria-label*='stop' i], button[aria-label*='Dừng tạo' i], mat-progress-spinner, .loading-spinner, spark-icon")
+                    if stop_loc.count() > 0 and any(s.is_visible() for s in stop_loc.all()):
                         is_busy = True
                 except Exception:
                     pass
 
-                # Check if Copy icon / action toolbar is visible on the response container (100% completion indicator)
+                # Check if actual Copy icon is visible on the response container
                 has_copy_btn = False
                 try:
                     copy_selectors = [
@@ -1893,9 +1893,6 @@ class BrowserManager:
                         "button[aria-label*='sao chép' i]",
                         "button[data-test-id='copy-button']",
                         "button[data-testid*='copy']",
-                        "mat-icon:has-text('content_copy')",
-                        "button[aria-label*='Good response' i]",
-                        "button[aria-label*='Hài lòng' i]",
                     ]
                     for c_sel in copy_selectors:
                         c_loc = target_response.locator(c_sel)
@@ -1908,22 +1905,26 @@ class BrowserManager:
                 curr_lower = current_text.lower()
                 is_placeholder = any(ph in curr_lower for ph in PLACEHOLDER_TEXTS) or (len(current_text) < 25 and is_busy)
 
-                # Immediate completion when Copy icon is rendered and text is valid!
-                if has_copy_btn and not is_placeholder and current_text:
-                    self._logger.info("[Tab {}] Verified Copy Icon present -> Response generation 100% complete ({:.1f}s)", stage_idx, time.time() - gen_start)
-                    last_text = current_text
-                    break
-
+                # Only finish generation when text is stable AND browser is not busy AND not placeholder
                 if current_text and current_text == last_text and not is_busy and not is_placeholder:
                     stable_count += 1
-                    if stable_count >= 3:
-                        self._logger.info("[Tab {}] Response generation finished & stabilized ({:.1f}s)", stage_idx, time.time() - gen_start)
+                    # If copy button is verified AND text is stable for 2 cycles, or if text is stable for 4 cycles (~2.5s)
+                    if (has_copy_btn and stable_count >= 2) or stable_count >= 4:
+                        # Extra safeguard for Stage 1 (Video Observation): wait longer if text is unexpectedly short (<200 chars)
+                        if stage_idx == 1 and len(current_text) < 200 and (time.time() - gen_start < 25.0):
+                            self._logger.info("[Tab 1] Video description text is short ({} chars), waiting to ensure full output generation...", len(current_text))
+                            time.sleep(1.5)
+                            last_text = current_text
+                            continue
+
+                        self._logger.info("[Tab {}] Verified complete & stable response ({} chars, {:.1f}s)", stage_idx, len(current_text), time.time() - gen_start)
+                        last_text = current_text
                         break
                 else:
                     stable_count = 0
                     last_text = current_text
 
-                time.sleep(0.5)
+                time.sleep(0.6)
 
             if not last_text:
                 snapshot_dir = self.save_dom_snapshot(page, f"Tab {stage_idx} empty response text", job_id)

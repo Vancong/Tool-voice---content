@@ -2494,8 +2494,24 @@ function doPost(e) {
 
     def _on_cancel(self) -> None:
         self._cancel_token.set()
-        self._append_log("⏹ Đã gửi tín hiệu dừng. Đang dừng pipeline...")
-        self._btn_cancel.configure(state="disabled")
+        self._append_log("⏹ Đã bấm Dừng! Đang hủy tiến trình và reset trạng thái trình duyệt...")
+
+        # Reset multi-agent provider initialization state
+        if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
+            self._multi_agent_provider._tabs_initialized = False
+
+        # Close browser instance to force clean restart on next run (keeps cookies saved)
+        try:
+            if hasattr(self, "_gemini_web_provider") and self._gemini_web_provider and self._gemini_web_provider.browser_manager:
+                self._gemini_web_provider.browser_manager.close()
+                self._append_log("✓ Đã đóng phiên trình duyệt thành công.")
+        except Exception as exc:
+            self._append_log(f"⚠️ Đóng trình duyệt warning: {exc}")
+
+        self._reset_ui_state()
+        self._lbl_stage.configure(text="Trạng thái: Đã dừng tiến trình ⏹")
+        self._progress_bar.set(0.0)
+        self._lbl_pct.configure(text="0%")
 
     def _run_pipeline(
         self,

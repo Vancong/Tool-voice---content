@@ -255,12 +255,14 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             _logger.warning("Stage 1 description rejected: incomplete timestamps ({}) or short length ({})", len(timestamps), len(text))
             return False
 
+        # Require core video analysis markers or 'review thành công' completion tag
         required_markers = [
             "diễn biến", "nhân vật", "hành động", "khoảnh khắc",
-            "biểu cảm", "tương tác", "bản mô tả", "mô tả"
+            "biểu cảm", "tương tác", "bản mô tả", "mô tả", "review thành công"
         ]
         matches = sum(1 for m in required_markers if m in t_lower)
-        return matches >= 1 or len(timestamps) >= 2
+        has_success_tag = "review thành công" in t_lower
+        return has_success_tag or matches >= 1 or len(timestamps) >= 2
 
     def _generate_for_clip_gemini_web(
         self,
@@ -301,7 +303,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"[CLIP #{clip_num}/{total_clips}]\n"
             "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO\n"
             "Hãy quan sát kĩ video được đính kèm và cung cấp đầy đủ thông tin theo đúng định dạng "
-            "của Công việc 1 đã được thiết lập."
+            "của Công việc 1 đã được thiết lập.\n"
+            "QUAN TRỌNG: Hãy chắc chắn kết thúc bài mô tả của bạn bằng chính xác cụm từ: \"Review thành công\"."
         )
         if clip_title_str:
             video_prompt += f"\n\nTIÊU ĐỀ / CHỦ ĐỀ CỦA CLIP NÀY:\n{clip_title_str}"

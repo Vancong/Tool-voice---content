@@ -349,7 +349,7 @@ class TopicDialog(ctk.CTkToplevel):
         on_save_callback: Callable[[str], None],
     ):
         super().__init__(parent)
-        self.title("🎯 Nhập Chủ Đề Phim / Nội Dung")
+        self.title("🎯 Nhập Chủ Đề")
         self.geometry("600x380")
         self.minsize(500, 300)
         self.configure(fg_color=BG_MAIN)
@@ -363,7 +363,7 @@ class TopicDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             hdr,
-            text="🎯 Nhập Chủ Đề Phim / Nội Dung Cần Viết",
+            text="🎯 Nhập Chủ Đề",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left", padx=14, pady=10)

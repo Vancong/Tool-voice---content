@@ -336,7 +336,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         if not stage1_desc or not self._is_valid_stage1_description(stage1_desc):
             _logger.error("❌ Tab 1 failed to return valid video description for Clip {} after {} attempts!", clip_num, max_attempts)
-            stage1_desc = f"Clip {clip_num}: Không thể phân tích video."
+            raise ReviewError(f"Clip {clip_num}: Gemini (Tab 1) không thể phân tích video sau {max_attempts} lần thử (thiếu tag 'Review thành công' hoặc bị ngắt). Đã dừng chương trình để bảo đảm dữ liệu.")
 
         # ── Tab 2: Send Tab1 description, get final script ──
         if progress_cb:
@@ -386,19 +386,21 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             p_lines = [p.strip() for p in txt.splitlines() if p.strip()]
             unique_p = []
             for p in p_lines:
-                p_normalized = p.lower().strip()
+                p_clean = p.strip("…").strip(".").strip()
+                p_normalized = p_clean.lower()
                 # Skip header/prompt echo lines if Claude echos input prompt
                 if any(k in p_normalized for k in ["thông tin đầu vào", "công việc 1", "công việc 2", "tiêu đề / chủ đề"]):
                     continue
                 
-                # Check if this line is a prefix/substring of an existing longer line, or vice versa
+                # Check if this line is a prefix/substring of an existing line, or vice versa
                 is_sub = False
                 for idx, existing in enumerate(unique_p):
-                    ex_norm = existing.lower().strip()
-                    if p_normalized in ex_norm:
+                    ex_clean = existing.strip("…").strip(".").strip()
+                    ex_norm = ex_clean.lower()
+                    if p_normalized in ex_norm or ex_norm.startswith(p_normalized[:40]):
                         is_sub = True
                         break
-                    elif ex_norm in p_normalized:
+                    elif ex_norm in p_normalized or p_normalized.startswith(ex_norm[:40]):
                         # Current line is longer and contains previous line -> replace previous line
                         unique_p[idx] = p
                         is_sub = True

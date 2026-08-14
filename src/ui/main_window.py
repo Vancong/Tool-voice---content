@@ -339,6 +339,101 @@ DEFAULT_JOB2_PROMPT = (
 )
 
 
+class TopicDialog(ctk.CTkToplevel):
+    """Modal dialog to enter/edit the main topic for video content generation."""
+
+    def __init__(
+        self,
+        parent: ctk.CTk,
+        current_topic: str,
+        on_save_callback: Callable[[str], None],
+    ):
+        super().__init__(parent)
+        self.title("🎯 Nhập Chủ Đề Phim / Nội Dung")
+        self.geometry("600x380")
+        self.minsize(500, 300)
+        self.configure(fg_color=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+
+        self._on_save_callback = on_save_callback
+
+        hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BG_CARD_BORDER)
+        hdr.pack(fill="x", padx=16, pady=(16, 8))
+
+        ctk.CTkLabel(
+            hdr,
+            text="🎯 Nhập Chủ Đề Phim / Nội Dung Cần Viết",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", padx=14, pady=10)
+
+        ctk.CTkLabel(
+            self,
+            text="💡 Nội dung chủ đề bạn nhập sẽ tự động được nối trực tiếp vào Prompt Công Việc 2 (CV2) dạng:\n'Chủ đề cần viết nội dung : ...'",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            wraplength=560,
+            justify="left",
+        ).pack(fill="x", padx=18, pady=(0, 8))
+
+        self._txt_topic = ctk.CTkTextbox(
+            self,
+            font=ctk.CTkFont(size=11),
+            fg_color=BG_INPUT,
+            border_color=BORDER_INPUT,
+            border_width=1,
+            corner_radius=8,
+        )
+        self._txt_topic.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+        if current_topic:
+            self._txt_topic.insert("1.0", current_topic)
+
+        btn_bar = ctk.CTkFrame(self, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=16, pady=(0, 14))
+
+        ctk.CTkButton(
+            btn_bar,
+            text="✅ Lưu Chủ Đề",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color=ACCENT_BLUE_HOVER,
+            height=32,
+            command=self._on_save,
+        ).pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_bar,
+            text="🗑️ Xóa",
+            font=ctk.CTkFont(size=11),
+            fg_color=BG_SUB_CARD,
+            hover_color="#374151",
+            height=32,
+            command=self._on_clear,
+        ).pack(side="right", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_bar,
+            text="Hủy",
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent",
+            hover_color=BG_SUB_CARD,
+            height=32,
+            command=self.destroy,
+        ).pack(side="right")
+
+    def _on_save(self) -> None:
+        val = self._txt_topic.get("1.0", "end-1c").strip()
+        self._on_save_callback(val)
+        self.destroy()
+
+    def _on_clear(self) -> None:
+        self._txt_topic.delete("1.0", "end")
+        self._on_save_callback("")
+        self.destroy()
+
+
 class ClipTitlesDialog(ctk.CTkToplevel):
     """Modal dialog to enter/edit custom titles/topics for each video clip."""
 
@@ -637,6 +732,7 @@ class MainWindow(ctk.CTk):
         self._last_job_id: Optional[str] = None
         self._custom_sample_text: Optional[str] = None
         self._clip_titles: dict[str, str] = {}
+        self._topic_text: str = ""
 
         # Gemini Web provider & API Key / State Variables
         self._gemini_web_provider = GeminiWebProvider()
@@ -835,45 +931,45 @@ class MainWindow(ctk.CTk):
             val_label.grid(row=idx, column=1, sticky="w", padx=(4, 10), pady=1)
             setattr(self, attr_name, val_label)
 
-        # Clip Titles Management Card
-        clip_title_card = ctk.CTkFrame(
+        # Topic (Chủ Đề) Card
+        topic_card = ctk.CTkFrame(
             left_card,
             fg_color=BG_SUB_CARD,
             border_width=1,
             border_color=BG_CARD_BORDER,
             corner_radius=10,
         )
-        clip_title_card.pack(fill="x", padx=14, pady=(0, 6))
+        topic_card.pack(fill="x", padx=14, pady=(0, 6))
 
-        hdr_title_box = ctk.CTkFrame(clip_title_card, fg_color="transparent")
-        hdr_title_box.pack(fill="x", padx=10, pady=(4, 2))
+        hdr_topic_box = ctk.CTkFrame(topic_card, fg_color="transparent")
+        hdr_topic_box.pack(fill="x", padx=10, pady=(4, 2))
 
         ctk.CTkLabel(
-            hdr_title_box,
-            text="🏷️ Tiêu Đề Riêng Từng Clip:",
+            hdr_topic_box,
+            text="🎯 Chủ Đề:",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(side="left")
 
-        self._lbl_clip_titles_status = ctk.CTkLabel(
-            hdr_title_box,
-            text="Chưa nạp video",
+        self._lbl_topic_status = ctk.CTkLabel(
+            hdr_topic_box,
+            text="Chưa nhập chủ đề",
             font=ctk.CTkFont(size=11),
             text_color=TEXT_MUTED,
         )
-        self._lbl_clip_titles_status.pack(side="right")
+        self._lbl_topic_status.pack(side="right")
 
-        self._btn_edit_clip_titles = ctk.CTkButton(
-            clip_title_card,
-            text="✏️ Thêm / Sửa Tiêu Đề Từng Clip",
+        self._btn_edit_topic = ctk.CTkButton(
+            topic_card,
+            text="✏️ Nhập Chủ Đề",
             font=ctk.CTkFont(size=11, weight="bold"),
             fg_color="#2563eb",
             hover_color="#1d4ed8",
             height=28,
             corner_radius=6,
-            command=self._on_edit_clip_titles,
+            command=self._on_edit_topic,
         )
-        self._btn_edit_clip_titles.pack(fill="x", padx=10, pady=(2, 6))
+        self._btn_edit_topic.pack(fill="x", padx=10, pady=(2, 6))
 
     def _build_right_column(self, parent: ctk.CTkFrame) -> None:
         """Right Column: AI Engine, Few-Shot Style, TTS Voices, Google Sheet & Custom Prompt."""
@@ -2169,7 +2265,25 @@ class MainWindow(ctk.CTk):
     def _on_video_info_failed(self, err_msg: str) -> None:
         self._thumb_label.configure(text=f"Lỗi đọc video\n({err_msg})")
         self._append_log(f"❌ Lỗi đọc video: {err_msg}")
-        messagebox.showerror("Lỗi đọc video", f"Không thể đọc thông tin nguồn video:\n{err_msg}")
+    def _update_topic_status_label(self) -> None:
+        if not hasattr(self, "_lbl_topic_status"):
+            return
+        if self._topic_text:
+            prev = self._topic_text[:25] + "..." if len(self._topic_text) > 25 else self._topic_text
+            self._lbl_topic_status.configure(text=f"🟢 Đã nhập ({prev})", text_color="#10b981")
+        else:
+            self._lbl_topic_status.configure(text="Chưa nhập chủ đề", text_color=TEXT_MUTED)
+
+    def _on_edit_topic(self) -> None:
+        def _save_cb(new_topic: str) -> None:
+            self._topic_text = new_topic
+            self._update_topic_status_label()
+            if new_topic:
+                self._append_log(f"🎯 Đã nạp chủ đề nội dung: '{new_topic[:50]}...'")
+            else:
+                self._append_log("🎯 Đã xóa chủ đề nội dung.")
+
+        TopicDialog(self, current_topic=self._topic_text, on_save_callback=_save_cb)
 
     def _update_clip_titles_status(self) -> None:
         if not hasattr(self, "_lbl_clip_titles_status"):
@@ -2445,7 +2559,7 @@ class MainWindow(ctk.CTk):
             self._reset_ui_state()
             return
 
-        custom_instructions = ""
+        custom_instructions = self._topic_text.strip() if hasattr(self, "_topic_text") and self._topic_text else ""
 
         self._worker_thread = threading.Thread(
             target=self._run_pipeline,

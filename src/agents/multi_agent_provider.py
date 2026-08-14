@@ -84,6 +84,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         self,
         total_clips: int,
         progress_cb: Optional[Callable[[str, float], None]] = None,
+        custom_instructions: Optional[str] = None,
     ) -> None:
         """
         STEP 1 (once): Send system prompts to Tab 1 and Tab 2.
@@ -183,6 +184,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 "Cảm xúc: Warm humor hoặc Adorable curiosity.\n"
                 "Chỉ xuất ra 1 câu lời bình hoàn chỉnh, không giải thích, không tiêu đề."
             )
+
+        if custom_instructions and custom_instructions.strip():
+            p2_template = p2_template + f"\n\nChủ đề cần viết nội dung : {custom_instructions.strip()}"
 
         # ── Tab 1: Setup Observer Role ──
         if progress_cb:
@@ -615,7 +619,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         # ── GEMINI WEB: Setup Tab 1 + Tab 2 ONCE before processing clips ──
         if use_gemini_web:
-            self._setup_gemini_web_tabs(total_clips, progress_cb)
+            self._setup_gemini_web_tabs(total_clips, progress_cb, custom_instructions=custom_instructions)
 
         # ── Process each clip ──
         for i in range(total_clips):

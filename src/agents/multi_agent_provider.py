@@ -225,12 +225,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         self._tabs_initialized = True
 
     def _is_valid_stage1_description(self, text: str) -> bool:
-        """Validate if Tab 1 response is a real video breakdown vs a boilerplate prompt echo/refusal."""
-        if not text or len(text.strip()) < 120:
+        """Validate if Tab 1 response is a real complete video breakdown vs a cutoff/boilerplate response."""
+        if not text or len(text.strip()) < 300:
             return False
-        t_lower = text.lower()
+        t_lower = text.strip().lower()
 
-        # Reject boilerplate prompt echo or confirmation acknowledgements
+        # Reject cutoff indicator lines or boilerplate prompt echoes
         invalid_keywords = [
             "tôi đã nắm rõ",
             "tôi sẽ tuân thủ",
@@ -245,23 +245,22 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             "bạn đã dừng",
         ]
         for ik in invalid_keywords:
-            if ik in t_lower and len(text) < 450:
+            if ik in t_lower:
                 return False
 
-        # Require core video analysis markers
+        # Require multiple timestamps (00:0X) or detailed action markers
+        import re
+        timestamps = re.findall(r'\b0\d:\d\d\b', t_lower)
+        if len(timestamps) < 2 and len(text) < 450:
+            _logger.warning("Stage 1 description rejected: incomplete timestamps ({}) or short length ({})", len(timestamps), len(text))
+            return False
+
         required_markers = [
-            "diễn biến",
-            "nhân vật",
-            "hành động",
-            "khoảnh khắc",
-            "biểu cảm",
-            "tương tác",
-            "00:",
-            "từ 00:",
-            "bản mô tả",
+            "diễn biến", "nhân vật", "hành động", "khoảnh khắc",
+            "biểu cảm", "tương tác", "bản mô tả", "mô tả"
         ]
         matches = sum(1 for m in required_markers if m in t_lower)
-        return matches >= 2
+        return matches >= 1 or len(timestamps) >= 2
 
     def _generate_for_clip_gemini_web(
         self,

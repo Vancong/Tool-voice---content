@@ -650,8 +650,14 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             
             # ── Instantly push THIS clip's content to Google Sheet Webhook ──
             try:
+                import re
                 stt_val = str(clip_num)
-                voice_name = f"AT-{clip_num:02d}.mp3"
+                if clip_video_path:
+                    digits = re.findall(r'\d+', Path(clip_video_path).stem)
+                    if digits:
+                        stt_val = str(int(digits[-1]))
+                
+                voice_name = f"AT-{int(stt_val):02d}.mp3" if stt_val.isdigit() else f"AT-{stt_val}.mp3"
                 sheet_webhook = kwargs.get("google_sheet_webhook_url") or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
                 
                 if sheet_webhook:

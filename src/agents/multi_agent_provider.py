@@ -234,7 +234,11 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             return False
         t_lower = text.strip().lower()
 
-        # Reject explicit refusal or cutoff indicator lines
+        # 1. Strictly check for the required 'review thành công' completion phrase FIRST
+        if "review thành công" in t_lower:
+            return True
+
+        # 2. Reject explicit refusal or cutoff indicator lines
         invalid_keywords = [
             "tôi đã nắm rõ",
             "tôi sẽ tuân thủ",
@@ -250,10 +254,6 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         for ik in invalid_keywords:
             if ik in t_lower:
                 return False
-
-        # Strictly check for the required 'review thành công' completion phrase
-        if "review thành công" in t_lower:
-            return True
 
         _logger.warning("Stage 1 description rejected: missing 'Review thành công' tag at the end ({} chars)", len(text))
         return False

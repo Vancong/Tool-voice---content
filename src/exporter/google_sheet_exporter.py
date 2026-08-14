@@ -48,16 +48,23 @@ function doPost(e) {
 
     // Live single-clip mode: upsert by stt_video to prevent duplicates
     if (data.total_rows === 1 && rows.length === 1) {
-      var newStt = String(rows[0].stt_video || "");
+      var newSttRaw = rows[0].stt_video;
+      var newSttStr = String(newSttRaw || "").trim();
+      var newSttNum = Number(newSttStr);
       var lastRow = sheet.getLastRow();
       var found = false;
-      if (newStt && lastRow > 1) {
+
+      if (newSttStr && lastRow > 1) {
         var sttCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
         for (var r = 0; r < sttCol.length; r++) {
-          if (String(sttCol[r][0]) === newStt) {
+          var cellValRaw = sttCol[r][0];
+          var cellValStr = String(cellValRaw || "").trim();
+          var cellValNum = Number(cellValStr);
+
+          if (cellValStr === newSttStr || (!isNaN(newSttNum) && !isNaN(cellValNum) && newSttNum === cellValNum)) {
             // Update existing row in-place
             sheet.getRange(r + 2, 1, 1, 3).setValues([[
-              rows[0].stt_video || (r + 1),
+              newSttRaw,
               rows[0].noi_dung_moi_viet || "",
               rows[0].voice || ""
             ]]);

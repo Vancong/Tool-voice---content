@@ -1540,41 +1540,13 @@ class MainWindow(ctk.CTk):
             _enqueue_log(f"📝 Áp dụng mẫu nhanh: {preset_key}")
 
     def _show_apps_script_guide(self) -> None:
-        guide_text = """HƯỚNG DẪN 1-CLICK TẠO GOOGLE SHEET WEBHOOK (BATCH CLIPS):
+        from src.exporter.google_sheet_exporter import GOOGLE_APPS_SCRIPT_TEMPLATE
+        guide_text = f"""HƯỚNG DẪN 1-CLICK TẠO GOOGLE SHEET WEBHOOK (BATCH CLIPS):
 
 1. Mở Google Sheet mới -> Chọn Tiện ích mở rộng (Extensions) -> Apps Script.
 2. Dán đoạn mã sau vào:
 
-function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["stt video", "nội dung mới viết", "voice"]);
-      var headerRange = sheet.getRange(1, 1, 1, 3);
-      headerRange.setBackground("#1e293b");
-      headerRange.setFontColor("#ffffff");
-      headerRange.setFontWeight("bold");
-    }
-    
-    var rows = data.rows || [];
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      sheet.appendRow([
-        r.stt_video || (i + 1),
-        r.noi_dung_moi_viet || "",
-        r.voice || ""
-      ]);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({status: "success", count: rows.length}))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({status: "error", message: err.toString()}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+{GOOGLE_APPS_SCRIPT_TEMPLATE.strip()}
 
 3. Nhấn Deploy (Triển khai) -> New deployment -> Web app -> Chọn Who has access: Anyone -> Deploy.
 4. Copy Webhook URL nhận được và dán vào ô 'Webhook URL' trên Tool!"""

@@ -225,12 +225,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         self._tabs_initialized = True
 
     def _is_valid_stage1_description(self, text: str) -> bool:
-        """Validate if Tab 1 response is a real complete video breakdown vs a cutoff/boilerplate response."""
-        if not text or len(text.strip()) < 300:
+        """Validate if Tab 1 response is complete by checking strictly for 'review thành công' tag."""
+        if not text or len(text.strip()) < 100:
             return False
         t_lower = text.strip().lower()
 
-        # Reject cutoff indicator lines or boilerplate prompt echoes
+        # Reject explicit refusal or cutoff indicator lines
         invalid_keywords = [
             "tôi đã nắm rõ",
             "tôi sẽ tuân thủ",
@@ -239,7 +239,6 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             "chưa có dữ liệu clip",
             "bạn chưa tải",
             "không có dữ liệu",
-            "mẫu khung",
             "không thể phân tích",
             "bạn đã dừng câu trả lời này",
             "bạn đã dừng",
@@ -248,21 +247,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             if ik in t_lower:
                 return False
 
-        # Require multiple timestamps (00:0X) or detailed action markers
-        import re
-        timestamps = re.findall(r'\b0\d:\d\d\b', t_lower)
-        if len(timestamps) < 2 and len(text) < 450:
-            _logger.warning("Stage 1 description rejected: incomplete timestamps ({}) or short length ({})", len(timestamps), len(text))
-            return False
+        # Strictly check for the required 'review thành công' completion phrase
+        if "review thành công" in t_lower:
+            return True
 
-        # Require core video analysis markers or 'review thành công' completion tag
-        required_markers = [
-            "diễn biến", "nhân vật", "hành động", "khoảnh khắc",
-            "biểu cảm", "tương tác", "bản mô tả", "mô tả", "review thành công"
-        ]
-        matches = sum(1 for m in required_markers if m in t_lower)
-        has_success_tag = "review thành công" in t_lower
-        return has_success_tag or matches >= 1 or len(timestamps) >= 2
+        _logger.warning("Stage 1 description rejected: missing 'Review thành công' tag at the end ({} chars)", len(text))
+        return False
 
     def _generate_for_clip_gemini_web(
         self,

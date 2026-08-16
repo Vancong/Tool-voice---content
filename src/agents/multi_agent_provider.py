@@ -923,13 +923,11 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         video_info = kwargs.get("video_info")
         clips_list = getattr(video_info, "clips", []) if video_info else []
 
-        if video_info and getattr(video_info, "is_multi_clip", False) and len(video_info.clips) > 0:
-            total_clips = len(video_info.clips)
+        if clips_list and len(clips_list) > 0:
+            total_clips = len(clips_list)
         else:
-            events = timeline_result.timeline.events
-            total_clips = len(events)
-            if total_clips == 0:
-                total_clips = 1
+            events = getattr(getattr(timeline_result, "timeline", None), "events", []) if timeline_result else []
+            total_clips = len(events) if events else 1
 
         _logger.info("Generating per-clip review script for {} clips (Review Engine: {}, Write Engine: {})...", total_clips, self._review_video_engine, self._write_content_engine)
 

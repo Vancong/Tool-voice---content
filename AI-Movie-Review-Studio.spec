@@ -32,6 +32,10 @@ ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
 # Playwright driver files
 pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
 
+# faster-whisper & ctranslate2
+fw_datas, fw_binaries, fw_hiddenimports = collect_all("faster_whisper")
+ct_datas, ct_binaries, ct_hiddenimports = collect_all("ctranslate2")
+
 # pydantic-settings
 pydantic_datas = collect_data_files("pydantic_settings")
 
@@ -43,19 +47,25 @@ project_datas = [
 all_datas = (
     ctk_datas
     + pw_datas
+    + fw_datas
+    + ct_datas
     + pydantic_datas
     + project_datas
 )
-all_binaries = ctk_binaries + pw_binaries
+all_binaries = ctk_binaries + pw_binaries + fw_binaries + ct_binaries
 all_hiddenimports = list(set(
     ctk_hiddenimports
     + pw_hiddenimports
+    + fw_hiddenimports
+    + ct_hiddenimports
     + [
         "playwright",
         "playwright.sync_api",
         "playwright.async_api",
         "playwright._impl._driver",
         "customtkinter",
+        "faster_whisper",
+        "ctranslate2",
         "PIL._tkinter_finder",
         "PIL.ImageTk",
         "tkinter",
@@ -107,7 +117,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        "faster_whisper",
         "torch",
         "torchaudio",
         "torchvision",

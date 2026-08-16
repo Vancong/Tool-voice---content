@@ -273,6 +273,9 @@ class FasterWhisperProvider(BaseSTT):
             mon_thread = threading.Thread(target=_construction_timer, daemon=True)
             mon_thread.start()
 
+            if WhisperModel is None:
+                raise ModelLoadError("Thư viện 'faster-whisper' chưa được cài đặt hoặc chưa được đóng gói vào ứng dụng.")
+
             try:
                 import os
                 cpu_threads = max(1, os.cpu_count() or 4) if device == "cpu" else 4

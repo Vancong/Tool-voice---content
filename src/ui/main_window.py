@@ -2758,23 +2758,13 @@ class MainWindow(ctk.CTk):
         output_file = out_folder / f"{video_path.stem}_review.mp4"
         self._last_output_file = output_file
 
-        # Check if this job folder has been 100% completed previously
+        # Check if this job folder has been completed previously - automatically clean old cache and restart
         job_dir = Path("data/jobs") / job_id
         completed_tag = job_dir / "JOB_COMPLETED.tag"
         if completed_tag.exists():
             import shutil
-            ask_clean = messagebox.askyesno(
-                "Dữ Liệu Đã Tồn Tại",
-                f"Thư mục '{video_path.name}' này đã được phân tích HOÀN TẤT trước đó.\n\n"
-                "👉 Bạn có muốn XÓA DỮ LIỆU CŨ & BẮT ĐẦU PHÂN TÍCH LẠI THƯ MỤC NÀY từ đầu ngay bây giờ không?\n\n"
-                "• Chọn [Có] (Yes): Xóa dữ liệu cũ và phân tích lại từ Clip 1.\n"
-                "• Chọn [Không] (No): Hủy thao tác."
-            )
-            if ask_clean:
-                shutil.rmtree(job_dir, ignore_errors=True)
-                self._append_log(f"🔄 Đã xóa toàn bộ dữ liệu cũ của thư mục '{video_path.name}'. Đang bắt đầu phân tích lại từ Clip 1...")
-            else:
-                return
+            shutil.rmtree(job_dir, ignore_errors=True)
+            self._append_log(f"🔄 Tự động làm mới dữ liệu của thư mục '{video_path.name}' và phân tích lại từ đầu...")
 
         # UI state transitions
         self._cancel_token.clear()

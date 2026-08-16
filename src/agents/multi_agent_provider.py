@@ -519,7 +519,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
             for attempt in range(1, 4):
                 try:
-                    res = requests.post(url, headers=headers, json=payload, timeout=(30, 180))
+                    res = requests.post(url, headers=headers, json=payload, timeout=(120, 180))
                     if res.status_code == 200:
                         txt = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
                         _logger.info("📥 [DEBUG STAGE 1 GEMINI RESPONSE] Clip {}:\n==================================================\n{}\n==================================================", video_file.name, txt)

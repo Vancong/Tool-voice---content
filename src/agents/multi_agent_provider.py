@@ -478,6 +478,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
             "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
         )
+        if "review thành công" not in prompt_stage1.lower():
+            prompt_stage1 += "\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài mô tả của bạn bằng chính xác cụm từ: \"Review thành công\"."
 
         max_attempts = 5
         last_exc = None
@@ -486,8 +488,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             if api_key.startswith("sk-"):
                 try:
                     desc = _call_shopaikey(prompt_stage1, frame_path, "gemini-2.5-flash")
-                    if desc:
+                    if desc and self._is_valid_stage1_description(desc):
                         return desc
+                    _logger.warning("Gemini API Stage 1 attempt {} returned invalid/incomplete description ({} chars)", attempt, len(desc or ""))
                 except Exception as exc:
                     last_exc = exc
                     _logger.warning("ShopAIKey Gemini Stage 1 attempt {} error: {}", attempt, exc)
@@ -505,8 +508,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                             else:
                                 resp = model.generate_content(prompt_stage1)
                             desc = resp.text.strip()
-                            if desc:
+                            if desc and self._is_valid_stage1_description(desc):
                                 return desc
+                            _logger.warning("GenerativeAI model {} Stage 1 returned invalid description", m)
                         except Exception as m_exc:
                             last_exc = m_exc
                             continue

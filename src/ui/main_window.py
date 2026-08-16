@@ -2691,7 +2691,7 @@ class MainWindow(ctk.CTk):
         engine_mode = f"{rev_engine}+{write_engine}"
         is_web_mode = (rev_engine == "gemini_web" or write_engine in ("chatgpt_web", "gemini_web", "claude_web"))
 
-        # 1. Kiểm tra session Tab 1 (Mô tả Video) nếu dùng Gemini Web
+        # 1. Kiểm tra session/API Key Tab 1 (Mô tả Video)
         sm = self._gemini_web_provider.session_manager
         rev_engine = self._review_video_engine_var.get()
         if rev_engine == "gemini_web" and not sm.has_session_file():
@@ -2701,8 +2701,17 @@ class MainWindow(ctk.CTk):
             )
             self._on_import_cookie()
             return
+        elif rev_engine == "gemini_api":
+            has_gemini_key = bool((os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
+            if not has_gemini_key:
+                messagebox.showwarning(
+                    "Chưa Nhập API Key (Tab 1) ⚠️",
+                    "Bạn đã chọn Gemini API cho Công việc 1 (Mô tả Video) nhưng chưa nhập API Key!\n\nVui lòng dán API Key để tiếp tục.",
+                )
+                self._on_import_gemini_api_key()
+                return
 
-        # 2. Kiểm tra session Tab 2 (Viết Content) theo AI được chọn
+        # 2. Kiểm tra session/API Key Tab 2 (Viết Content)
         write_engine = self._write_content_engine_var.get()
         if write_engine == "chatgpt_web" and not sm.has_chatgpt_session():
             messagebox.showwarning(
@@ -2723,12 +2732,14 @@ class MainWindow(ctk.CTk):
                 "Chưa có Cookie Gemini (Tab 2)",
                 "Bạn đã chọn Gemini Web để viết content nhưng chưa dán Cookie Gemini.\nVui lòng dán Cookie Gemini để tiếp tục.",
             )
-        elif rev_engine == "gemini_api" or write_engine == "gemini_api":
+            self._on_import_cookie()
+            return
+        elif write_engine == "gemini_api":
             has_gemini_key = bool((os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
             if not has_gemini_key:
                 messagebox.showwarning(
-                    "Chưa Nhập API Key ⚠️",
-                    "Bạn đã chọn Gemini API nhưng chưa cấu hình API Key!\n\nVui lòng dán API Key của bạn để tiếp tục.",
+                    "Chưa Nhập API Key (Tab 2) ⚠️",
+                    "Bạn đã chọn Gemini API cho Công việc 2 (Viết Content) nhưng chưa nhập API Key!\n\nVui lòng dán API Key để tiếp tục.",
                 )
                 self._on_import_gemini_api_key()
                 return
@@ -2736,8 +2747,17 @@ class MainWindow(ctk.CTk):
             has_openai_key = bool((os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip())
             if not has_openai_key:
                 messagebox.showwarning(
-                    "Chưa Nhập API Key ⚠️",
-                    "Bạn đã chọn ChatGPT API nhưng chưa cấu hình API Key!\n\nVui lòng dán API Key để tiếp tục.",
+                    "Chưa Nhập API Key (Tab 2) ⚠️",
+                    "Bạn đã chọn ChatGPT API cho Công việc 2 (Viết Content) nhưng chưa nhập API Key!\n\nVui lòng dán API Key để tiếp tục.",
+                )
+                self._on_import_gemini_api_key()
+                return
+        elif write_engine == "claude_api":
+            has_claude_key = bool((os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip())
+            if not has_claude_key:
+                messagebox.showwarning(
+                    "Chưa Nhập API Key (Tab 2) ⚠️",
+                    "Bạn đã chọn Claude API cho Công việc 2 (Viết Content) nhưng chưa nhập API Key!\n\nVui lòng dán API Key để tiếp tục.",
                 )
                 self._on_import_gemini_api_key()
                 return

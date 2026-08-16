@@ -550,6 +550,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             if "review thành công" not in prompt_stage1.lower():
                 prompt_stage1 += '\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài mô tả của bạn bằng chính xác cụm từ: "Review thành công".'
 
+            _logger.info("📤 [DEBUG STAGE 1 PROMPT] Clip {}:\n==================================================\n{}\n==================================================", media_path.name, prompt_stage1)
+
             stage1_desc = ""
             if api_key.startswith("sk-"):
                 models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
@@ -662,6 +664,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             )
             if "viết content thành công" not in prompt_stage2.lower():
                 prompt_stage2 += '\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài viết của bạn bằng chính xác cụm từ: "Viết content thành công".'
+
+            _logger.info("📤 [DEBUG STAGE 2 GEMINI PROMPT] Clip {}:\n==================================================\n{}\n==================================================", clip_idx + 1, prompt_stage2)
 
             if api_key.startswith("sk-"):
                 models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
@@ -797,6 +801,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n{custom_instructions}"
         )
         prompt_stage2 += "\nQUAN TRỌNG: Kết thúc nội dung bằng đúng cụm từ: \"Viết content thành công\"."
+        _logger.info("📤 [DEBUG STAGE 2 CLAUDE PROMPT] Clip {}:\n==================================================\n{}\n==================================================", clip_idx + 1, prompt_stage2)
         model_name = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {"model": model_name, "messages": [{"role": "user", "content": prompt_stage2}], "temperature": 0.7}
@@ -808,6 +813,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 res = requests.post(url, headers=headers, json=payload, timeout=120)
                 if res.status_code == 200:
                     txt = res.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'")
+                    _logger.info("📥 [DEBUG STAGE 2 CLAUDE RESPONSE] Clip {}:\n==================================================\n{}\n==================================================", clip_idx + 1, txt)
                     if txt and self._is_valid_stage2_script(txt):
                         return self._strip_stage2_tag(txt)
                     _logger.warning("Claude S2 clip {} attempt {}/3: Thiếu tag 'Viết content thành công'. Đang thử lại...", clip_idx + 1, attempt)
@@ -847,6 +853,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             if "viết content thành công" not in prompt_stage2.lower():
                 prompt_stage2 += '\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài viết của bạn bằng chính xác cụm từ: "Viết content thành công".'
 
+            _logger.info("📤 [DEBUG STAGE 2 OPENAI PROMPT] Clip {}:\n==================================================\n{}\n==================================================", clip_idx + 1, prompt_stage2)
+
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
@@ -866,6 +874,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     if res.status_code == 200:
                         data = res.json()
                         txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
+                        _logger.info("📥 [DEBUG STAGE 2 OPENAI RESPONSE] Clip {}:\n==================================================\n{}\n==================================================", clip_idx + 1, txt)
                         if txt and self._is_valid_stage2_script(txt):
                             return self._strip_stage2_tag(txt)
                         _logger.warning("OpenAI Stage 2 attempt {}/3: Thiếu tag 'Viết content thành công'. Đang thử lại...", attempt)

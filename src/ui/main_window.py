@@ -1615,10 +1615,10 @@ class MainWindow(ctk.CTk):
 
         self._btn_clear_cache = ctk.CTkButton(
             btn_bar,
-            text="🗑️ Xóa Cache",
+            text="🔄 Phân Tích Lại Thư Mục",
             font=ctk.CTkFont(size=12, weight="bold"),
             height=36,
-            width=110,
+            width=175,
             fg_color="#d97706",
             hover_color="#b45309",
             corner_radius=8,
@@ -2941,7 +2941,7 @@ class MainWindow(ctk.CTk):
                     "• Cột A (stt video): STT của clip (8, 12, 1...)\n"
                     "• Cột B (nội dung mới viết): Kịch bản review do AI viết\n"
                     "• Cột C (voice): Tên file mp3 tương ứng (08.mp3, 12.mp3, 1.mp3...)\n\n"
-                    "👉 Bạn có muốn XÓA CACHE lượt chạy này để lần sau có thể bấm phân tích lại từ đầu không?"
+                    "👉 Bạn có muốn ĐẶT LẠI DỮ LIỆU để lần sau phân tích lại thư mục này từ đầu không?"
                 )
                 if ask_clean:
                     self._clear_current_job_cache(silent=True)
@@ -2992,16 +2992,16 @@ class MainWindow(ctk.CTk):
         if job_dir.exists():
             try:
                 shutil.rmtree(job_dir)
-                self._append_log(f"🗑️ Đã xóa sạch Cache của dự án '{job_id}'!")
+                self._append_log(f"🔄 Đã sẵn sàng phân tích lại thư mục '{job_id}' từ Clip 1!")
                 if not silent:
-                    messagebox.showinfo("Đã Xóa Cache", f"🗑️ Đã xóa sạch Cache của dự án '{job_id}' thành công!\n\nLần chạy tiếp theo sẽ phân tích lại từ Clip 1.")
+                    messagebox.showinfo("Đã Đặt Lại", f"🔄 Đã chuẩn bị xong!\n\nLần chạy tiếp theo hệ thống sẽ phân tích lại thư mục này từ Clip 1.")
             except Exception as e:
-                self._append_log(f"⚠️ Không thể xóa cache: {e}")
+                self._append_log(f"⚠️ Không thể đặt lại dữ liệu: {e}")
                 if not silent:
-                    messagebox.showerror("Lỗi", f"Không thể xóa cache: {e}")
+                    messagebox.showerror("Lỗi", f"Không thể đặt lại dữ liệu: {e}")
         else:
             if not silent:
-                messagebox.showinfo("Thông báo", "Hiện tại dự án này chưa có Cache.")
+                messagebox.showinfo("Thông báo", "Thư mục này hiện tại chưa có dữ liệu cũ.")
         self._reset_ui_state(is_resume_ready=False)
 
     def _on_clear_cache_click(self) -> None:

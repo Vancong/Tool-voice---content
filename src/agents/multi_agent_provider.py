@@ -261,6 +261,27 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         _logger.warning("Stage 1 description rejected: missing 'Review thành công' tag at the end ({} chars)", len(text))
         return False
 
+    def _is_valid_stage2_script(self, text: str) -> bool:
+        """Validate if Stage 2 generated narration script is valid and not an AI complaint/meta-question."""
+        if not text or len(text.strip()) < 10:
+            return False
+        t_lower = text.strip().lower()
+        invalid_patterns = [
+            "need to see the complete input",
+            "could you provide",
+            "input appears to be cut off",
+            "task 1",
+            "vui lòng cung cấp",
+            "chưa có bản mô tả",
+            "không thể viết",
+            "thiếu thông tin đầu vào",
+            "bị cắt ngang",
+        ]
+        for pat in invalid_patterns:
+            if pat in t_lower:
+                return False
+        return True
+
     def _get_stage1_desc_gemini_web(
         self,
         clip_idx: int,
@@ -535,7 +556,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 try:
                     txt = _call_shopaikey(prompt_stage2, "gemini-2.5-flash")
                     if txt:
-                        return txt.strip('"').strip("'")
+                        clean_txt = txt.strip('"').strip("'")
+                        if self._is_valid_stage2_script(clean_txt):
+                            return clean_txt
+                        _logger.warning("Stage 2 output rejected (AI meta response): {}", clean_txt[:60])
                 except Exception as exc:
                     last_exc = exc
                     _logger.warning("ShopAIKey Gemini Stage 2 attempt {} error: {}", attempt, exc)
@@ -547,7 +571,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                         model = genai.GenerativeModel(m)
                         resp = model.generate_content(prompt_stage2)
                         txt = resp.text.strip().strip('"').strip("'")
-                        if txt:
+                        if txt and self._is_valid_stage2_script(txt):
                             return txt
                     except Exception as m_exc:
                         last_exc = m_exc

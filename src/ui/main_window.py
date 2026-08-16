@@ -1035,17 +1035,6 @@ class MainWindow(ctk.CTk):
         )
         rb_rev_gemini_api.pack(side="left", padx=(0, 10))
 
-        rb_rev_claude_api = ctk.CTkRadioButton(
-            row1,
-            text="Claude API",
-            variable=self._review_video_engine_var,
-            value="claude_api",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=ACCENT_BLUE,
-            hover_color=ACCENT_BLUE_HOVER,
-        )
-        rb_rev_claude_api.pack(side="left")
-
         self._btn_test_api_inline = ctk.CTkButton(
             row1,
             text="⚡ Test API Key",
@@ -2758,16 +2747,20 @@ class MainWindow(ctk.CTk):
                 return
             os.environ["ELEVENLABS_API_KEY"] = eleven_key
 
+        import hashlib
         out_folder = Path(self._output_var.get().strip() or CONFIG.composer.output_dir)
         out_folder.mkdir(parents=True, exist_ok=True)
-        job_id = str(uuid.uuid4())[:8]
+        
+        # Deterministic job_id per video/folder path to ensure Resume loads the exact checkpoint cache
+        video_id_str = str(video_path.resolve())
+        job_id = f"job_{hashlib.md5(video_id_str.encode('utf-8')).hexdigest()[:10]}"
         self._last_job_id = job_id
-        output_file = out_folder / f"{job_id}.mp4"
+        output_file = out_folder / f"{video_path.stem}_review.mp4"
         self._last_output_file = output_file
 
         # UI state transitions
         self._cancel_token.clear()
-        self._btn_generate.configure(state="disabled")
+        self._btn_generate.configure(state="disabled", text="⏸️ Đang Chạy...")
         self._btn_cancel.configure(state="normal")
         self._btn_open_folder.configure(state="disabled")
         self._btn_open_analysis.configure(state="disabled")
@@ -2918,12 +2911,11 @@ class MainWindow(ctk.CTk):
         _enqueue_log(f"▶ [{int(pct * 100)}%] Tiến trình: {stage}")
 
     def _handle_pipeline_complete(self, result: Result) -> None:
-        self._reset_ui_state()
-
         if hasattr(self, "_multi_agent_provider") and self._multi_agent_provider:
             self._multi_agent_provider._tabs_initialized = False
 
         if result.is_ok:
+            self._reset_ui_state(is_resume_ready=False)
             self._progress_bar.set(1.0)
             self._lbl_pct.configure(text="100%")
             self._lbl_stage.configure(text="Trạng thái: Hoàn tất thành công ✓")
@@ -2941,6 +2933,7 @@ class MainWindow(ctk.CTk):
             else:
                 messagebox.showinfo("Thành công", f"Đã tạo video review thành công!\n\nĐường dẫn:\n{self._last_output_file}")
         else:
+            self._reset_ui_state(is_resume_ready=True)
             self._lbl_stage.configure(text="Trạng thái: Xử lý thất bại ❌")
             err_msg = str(result.error)
             self._append_log(f"❌ Pipeline thất bại: {err_msg}")
@@ -2966,8 +2959,9 @@ class MainWindow(ctk.CTk):
             else:
                 messagebox.showerror("Lỗi xử lý", f"Pipeline gặp lỗi:\n\n{err_msg}")
 
-    def _reset_ui_state(self) -> None:
-        self._btn_generate.configure(state="normal")
+    def _reset_ui_state(self, is_resume_ready: bool = True) -> None:
+        btn_text = "▶️ BẮT ĐẦU / TIẾP TỤC" if is_resume_ready else "🚀 BẮT ĐẦU REVIEW"
+        self._btn_generate.configure(state="normal", text=btn_text, fg_color=ACCENT_GREEN)
         self._btn_cancel.configure(state="disabled")
 
     def _open_output_folder(self) -> None:

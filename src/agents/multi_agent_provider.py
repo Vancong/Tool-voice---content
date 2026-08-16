@@ -5,6 +5,7 @@ to generate per-clip narration text for TTS voiceover.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import time
 from pathlib import Path
@@ -431,7 +432,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
     ) -> str:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
         if not api_key:
-            return f"Phân cảnh {clip_idx + 1} diễn ra kịch tính với nhiều tình tiết lôi cuốn."
+            raise ReviewError(f"Gemini API Error (Clip #{clip_idx + 1}): Chưa cấu hình GEMINI_API_KEY!")
 
         def _call_shopaikey(prompt: str, img_path: Optional[Path] = None, model: str = "gemini-2.5-flash") -> str:
             import requests
@@ -450,25 +451,30 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             raise RuntimeError(f"ShopAIKey REST Error {res.status_code}: {res.text}")
 
-        try:
-            p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
-            p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
-            prompt_stage1 = p1_template if p1_template else (
-                "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
-                "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
-            )
+        p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
+        p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
+        prompt_stage1 = p1_template if p1_template else (
+            "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
+            "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
+        )
 
-            stage1_desc = ""
+        max_attempts = 5
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            _logger.info("Gemini API Stage 1 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
             if api_key.startswith("sk-"):
                 try:
-                    stage1_desc = _call_shopaikey(prompt_stage1, frame_path, "gemini-2.5-flash")
+                    desc = _call_shopaikey(prompt_stage1, frame_path, "gemini-2.5-flash")
+                    if desc:
+                        return desc
                 except Exception as exc:
-                    _logger.warning("ShopAIKey Gemini Stage 1 error: {}", exc)
+                    last_exc = exc
+                    _logger.warning("ShopAIKey Gemini Stage 1 attempt {} error: {}", attempt, exc)
 
-            if not stage1_desc and genai is not None:
+            if genai is not None:
                 try:
                     genai.configure(api_key=api_key)
-                    models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+                    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
                     for m in models:
                         try:
                             model = genai.GenerativeModel(m)
@@ -477,27 +483,26 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                                 resp = model.generate_content([img, prompt_stage1])
                             else:
                                 resp = model.generate_content(prompt_stage1)
-                            stage1_desc = resp.text.strip()
-                            if stage1_desc:
-                                break
-                        except Exception:
+                            desc = resp.text.strip()
+                            if desc:
+                                return desc
+                        except Exception as m_exc:
+                            last_exc = m_exc
                             continue
-                except Exception as exc:
-                    _logger.warning("GenerativeAI SDK error: {}", exc)
+                except Exception as sdk_exc:
+                    last_exc = sdk_exc
+                    _logger.warning("GenerativeAI SDK attempt {} error: {}", attempt, sdk_exc)
+            
+            time.sleep(2.0)
 
-            if stage1_desc:
-                return stage1_desc
-        except Exception as exc:
-            _logger.error("Stage 1 Gemini API error on clip {}: {}", clip_idx + 1, exc)
-
-        return f"Phân cảnh {clip_idx + 1} xuất hiện các nhân vật tương tác tự nhiên với nhau."
+        raise ReviewError(f"⚠️ [Lỗi Gemini API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_exc}). Đã lưu tiến trình các clip trước. Vui lòng kiểm tra mạng/API Key và nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _get_stage2_script_gemini_api(
         self, stage1_desc: str, clip_idx: int, total_clips: int, language: str = "vi", custom_instructions: str = ""
     ) -> str:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
         if not api_key:
-            return f"Phân cảnh {clip_idx + 1} diễn ra kịch tính với nhiều tình tiết lôi cuốn."
+            raise ReviewError(f"Gemini API Error (Clip #{clip_idx + 1}): Chưa cấu hình GEMINI_API_KEY!")
 
         def _call_shopaikey(prompt: str, model: str = "gemini-2.5-flash") -> str:
             import requests
@@ -511,28 +516,32 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             raise RuntimeError(f"ShopAIKey REST Error {res.status_code}: {res.text}")
 
-        try:
-            p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
-            p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
-            stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
-            custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
+        p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
+        p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
+        stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
+        custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
 
-            prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
-                "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
-                f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
-                f"{custom_instructions}"
-            )
+        prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
+            "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
+            f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
+            f"{custom_instructions}"
+        )
 
+        max_attempts = 5
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            _logger.info("Gemini API Stage 2 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
             if api_key.startswith("sk-"):
                 try:
                     txt = _call_shopaikey(prompt_stage2, "gemini-2.5-flash")
                     if txt:
                         return txt.strip('"').strip("'")
                 except Exception as exc:
-                    _logger.warning("ShopAIKey Gemini Stage 2 error: {}", exc)
+                    last_exc = exc
+                    _logger.warning("ShopAIKey Gemini Stage 2 attempt {} error: {}", attempt, exc)
 
             if genai is not None:
-                models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+                models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
                 for m in models:
                     try:
                         model = genai.GenerativeModel(m)
@@ -540,197 +549,214 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                         txt = resp.text.strip().strip('"').strip("'")
                         if txt:
                             return txt
-                    except Exception:
+                    except Exception as m_exc:
+                        last_exc = m_exc
                         continue
-        except Exception as exc:
-            _logger.error("Gemini API Stage 2 error on clip {}: {}", clip_idx + 1, exc)
 
-        return f"Phân cảnh {clip_idx + 1} mang lại những khoảnh khắc vô cùng ấn tượng."
+            time.sleep(2.0)
+
+        raise ReviewError(f"⚠️ [Lỗi Gemini API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_exc}). Đã lưu tiến trình các clip trước. Vui lòng kiểm tra mạng/API Key và nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _get_stage1_desc_openai_api(
         self, frame_path: Optional[Path], clip_idx: int, total_clips: int, custom_instructions: str = ""
     ) -> str:
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
         if not api_key:
-            raise RuntimeError("ChatGPT API error: Không tìm thấy OPENAI_API_KEY hoặc GEMINI_API_KEY.")
+            raise ReviewError(f"ChatGPT API error: Không tìm thấy OPENAI_API_KEY hoặc GEMINI_API_KEY cho Clip #{clip_idx + 1}.")
 
-        try:
-            import requests
-            p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
-            p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
-            prompt_stage1 = p1_template if p1_template else (
-                "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
-                "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
-            )
+        import requests
+        p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
+        p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
+        prompt_stage1 = p1_template if p1_template else (
+            "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
+            "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
+        )
 
-            content_list: List[dict] = [{"type": "text", "text": prompt_stage1}]
-            if frame_path and frame_path.exists():
-                with open(frame_path, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-                content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        content_list: List[dict] = [{"type": "text", "text": prompt_stage1}]
+        if frame_path and frame_path.exists():
+            with open(frame_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                "messages": [{"role": "user", "content": content_list}],
-                "temperature": 0.7
-            }
-            url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
-            if not url.endswith("/chat/completions"):
-                url = url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            "messages": [{"role": "user", "content": content_list}],
+            "temperature": 0.7
+        }
+        url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
+        if not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"
 
-            res = requests.post(url, headers=headers, json=payload, timeout=120)
-            if res.status_code == 200:
-                return res.json()["choices"][0]["message"]["content"].strip()
-            err_msg = f"ChatGPT API Stage 1 thất bại (status {res.status_code}): {res.text}"
-            _logger.error(err_msg)
-            raise RuntimeError(err_msg)
-        except Exception as exc:
-            _logger.error("ChatGPT API Stage 1 error on clip {}: {}", clip_idx + 1, exc)
-            raise RuntimeError(f"ChatGPT API Stage 1 lỗi tại clip {clip_idx + 1}: {exc}")
+        max_attempts = 5
+        last_err = ""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info("ChatGPT API Stage 1 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
+                if res.status_code == 200:
+                    return res.json()["choices"][0]["message"]["content"].strip()
+                last_err = f"Status {res.status_code}: {res.text}"
+            except Exception as exc:
+                last_err = str(exc)
+            time.sleep(2.0)
+
+        raise ReviewError(f"⚠️ [Lỗi ChatGPT API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_err}). Đã lưu tiến trình các clip trước. Vui lòng nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _get_stage1_desc_claude_api(
         self, frame_path: Optional[Path], clip_idx: int, total_clips: int, custom_instructions: str = ""
     ) -> str:
         api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
         if not api_key:
-            raise RuntimeError("Claude API error: Không tìm thấy API Key cho Claude API.")
+            raise ReviewError(f"Claude API error: Không tìm thấy API Key cho Claude API tại Clip #{clip_idx + 1}.")
 
-        try:
-            import requests
-            p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
-            p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
-            prompt_stage1 = p1_template if p1_template else (
-                "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
-                "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
-            )
+        import requests
+        p1_file = Path("TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO.txt")
+        p1_template = p1_file.read_text(encoding="utf-8").strip() if p1_file.exists() else ""
+        prompt_stage1 = p1_template if p1_template else (
+            "CÔNG VIỆC 1: TRỢ LÝ QUAN SÁT VÀ MÔ TẢ VIDEO/HÌNH ẢNH\n"
+            "Mô tả chi tiết: Hành động chính, Nhân vật xuất hiện, Biểu cảm ngôn ngữ cơ thể và Mối tương tác."
+        )
 
-            content_list: List[dict] = [{"type": "text", "text": prompt_stage1}]
-            if frame_path and frame_path.exists():
-                with open(frame_path, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-                content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        content_list: List[dict] = [{"type": "text", "text": prompt_stage1}]
+        if frame_path and frame_path.exists():
+            with open(frame_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            model_name = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": content_list}],
-                "temperature": 0.7
-            }
-            url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
-            if not url.endswith("/chat/completions"):
-                url = url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        model_name = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": content_list}],
+            "temperature": 0.7
+        }
+        url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
+        if not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"
 
-            res = requests.post(url, headers=headers, json=payload, timeout=120)
-            if res.status_code == 200:
-                data = res.json()
-                return data["choices"][0]["message"]["content"].strip()
-            err_msg = f"Claude API Stage 1 thất bại (status {res.status_code}): {res.text}"
-            _logger.error(err_msg)
-            raise RuntimeError(err_msg)
-        except Exception as exc:
-            _logger.error("Claude API Stage 1 error on clip {}: {}", clip_idx + 1, exc)
-            raise RuntimeError(f"Claude API Stage 1 lỗi tại clip {clip_idx + 1}: {exc}")
+        max_attempts = 5
+        last_err = ""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info("Claude API Stage 1 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                last_err = f"Status {res.status_code}: {res.text}"
+            except Exception as exc:
+                last_err = str(exc)
+            time.sleep(2.0)
+
+        raise ReviewError(f"⚠️ [Lỗi Claude API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_err}). Đã lưu tiến trình các clip trước. Vui lòng nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _get_stage2_script_claude_api(
         self, stage1_desc: str, clip_idx: int, total_clips: int, language: str = "vi", custom_instructions: str = ""
     ) -> str:
         api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
         if not api_key:
-            raise RuntimeError("Claude API error: Không tìm thấy API Key cho Claude API.")
+            raise ReviewError(f"Claude API error: Không tìm thấy API Key cho Claude API tại Clip #{clip_idx + 1}.")
 
-        try:
-            import requests
-            p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
-            p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
-            stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
-            custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
+        import requests
+        p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
+        p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
+        stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
+        custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
 
-            prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
-                "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
-                f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
-                f"{custom_instructions}"
-            )
+        prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
+            "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
+            f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
+            f"{custom_instructions}"
+        )
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            model_name = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt_stage2}],
-                "temperature": 0.7
-            }
-            url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
-            if not url.endswith("/chat/completions"):
-                url = url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        model_name = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt_stage2}],
+            "temperature": 0.7
+        }
+        url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
+        if not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"
 
-            res = requests.post(url, headers=headers, json=payload, timeout=120)
-            if res.status_code == 200:
-                data = res.json()
-                txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-                if txt:
-                    return txt
-            err_msg = f"Claude API Stage 2 thất bại (status {res.status_code}): {res.text}"
-            _logger.error(err_msg)
-            raise RuntimeError(err_msg)
-        except Exception as exc:
-            _logger.error("Claude API Stage 2 error on clip {}: {}", clip_idx + 1, exc)
-            raise RuntimeError(f"Claude API Stage 2 lỗi tại clip {clip_idx + 1}: {exc}")
+        max_attempts = 5
+        last_err = ""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info("Claude API Stage 2 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
+                if res.status_code == 200:
+                    data = res.json()
+                    txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
+                    if txt:
+                        return txt
+                last_err = f"Status {res.status_code}: {res.text}"
+            except Exception as exc:
+                last_err = str(exc)
+            time.sleep(2.0)
+
+        raise ReviewError(f"⚠️ [Lỗi Claude API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_err}). Đã lưu tiến trình các clip trước. Vui lòng nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _get_stage2_script_openai_api(
         self, stage1_desc: str, clip_idx: int, total_clips: int, language: str = "vi", custom_instructions: str = ""
     ) -> str:
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
         if not api_key:
-            raise RuntimeError("ChatGPT API error: Không tìm thấy API Key.")
+            raise ReviewError(f"ChatGPT API error: Không tìm thấy API Key tại Clip #{clip_idx + 1}.")
 
-        try:
-            import requests
-            p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
-            p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
-            stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
-            custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
+        import requests
+        p2_file = Path("TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP.txt")
+        p2_template = p2_file.read_text(encoding="utf-8").strip() if p2_file.exists() else ""
+        stage1_context = f"\n\nTHÔNG TIN ĐẦU VÀO TỪ CÔNG VIỆC 1:\n{stage1_desc}" if stage1_desc else ""
+        custom_addon = f"\n\nYÊU CẦU BỔ SUNG TỪ NGƯỜI DÙNG:\n{custom_instructions}" if custom_instructions.strip() else ""
 
-            prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
-                "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
-                f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
-                f"{custom_instructions}"
-            )
+        prompt_stage2 = f"{p2_template}{stage1_context}{custom_addon}" if p2_template else (
+            "CÔNG VIỆC 2: TRỢ LÝ VIẾT CONTENT NGẮN CHUYÊN NGHIỆP\n"
+            f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
+            f"{custom_instructions}"
+        )
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                "messages": [{"role": "user", "content": prompt_stage2}],
-                "temperature": 0.7
-            }
-            url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
-            if not url.endswith("/chat/completions"):
-                url = url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            "messages": [{"role": "user", "content": prompt_stage2}],
+            "temperature": 0.7
+        }
+        url = os.getenv("OPENAI_BASE_URL", "https://api.shopaikey.com/v1")
+        if not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"
 
-            res = requests.post(url, headers=headers, json=payload, timeout=120)
-            if res.status_code == 200:
-                data = res.json()
-                txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-                if txt:
-                    return txt
-            err_msg = f"ChatGPT API Stage 2 thất bại (status {res.status_code}): {res.text}"
-            _logger.error(err_msg)
-            raise RuntimeError(err_msg)
-        except Exception as exc:
-            _logger.error("ChatGPT API Stage 2 error on clip {}: {}", clip_idx + 1, exc)
-            raise RuntimeError(f"ChatGPT API Stage 2 lỗi tại clip {clip_idx + 1}: {exc}")
+        max_attempts = 5
+        last_err = ""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info("ChatGPT API Stage 2 (Clip {}/{}) — Attempt {}/{}...", clip_idx + 1, total_clips, attempt, max_attempts)
+                res = requests.post(url, headers=headers, json=payload, timeout=30)
+                if res.status_code == 200:
+                    data = res.json()
+                    txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
+                    if txt:
+                        return txt
+                last_err = f"Status {res.status_code}: {res.text}"
+            except Exception as exc:
+                last_err = str(exc)
+            time.sleep(2.0)
+
+        raise ReviewError(f"⚠️ [Lỗi ChatGPT API Clip #{clip_idx + 1}/{total_clips}] Đã thử lại {max_attempts} lần thất bại ({last_err}). Đã lưu tiến trình các clip trước. Vui lòng nhấn 'Tiếp tục' để chạy lại từ Clip #{clip_idx + 1}.")
 
     def _generate_for_clip_gemini_api(
         self, frame_path: Optional[Path], clip_idx: int, total_clips: int, language: str = "vi", custom_instructions: str = ""
@@ -784,6 +810,28 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 frames_dir = sorted(all_job_dirs, key=lambda p: p.stat().st_mtime, reverse=True)[0]
                 _logger.info("Using frames directory: {}", frames_dir)
 
+        # Per-clip cache files to support Resume seamlessly
+        cache_dir = Path("data") / "jobs" / job_id / "checkpoints"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        clip_cache_file = cache_dir / "clip_cache.json"
+        stage1_cache_file = cache_dir / "stage1_cache.json"
+
+        cached_clips: dict[str, str] = {}
+        if clip_cache_file.exists():
+            try:
+                cached_clips = json.loads(clip_cache_file.read_text(encoding="utf-8"))
+                _logger.info("Loaded {} existing final clip results from cache for job {}", len(cached_clips), job_id)
+            except Exception:
+                cached_clips = {}
+
+        stage1_clips: dict[str, str] = {}
+        if stage1_cache_file.exists():
+            try:
+                stage1_clips = json.loads(stage1_cache_file.read_text(encoding="utf-8"))
+                _logger.info("Loaded {} Stage 1 descriptions from cache for job {}", len(stage1_clips), job_id)
+            except Exception:
+                stage1_clips = {}
+
         # Determine AI backend mode
         use_web_browser = bool(
             self._browser_mgr and (
@@ -798,11 +846,20 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         # ── Process each clip ──
         for i in range(total_clips):
             clip_num = i + 1
+            clip_key = str(clip_num)
+
             if progress_cb:
                 pct = 0.80 + (i / total_clips) * 0.18  # range 80%→98%
                 progress_cb(f"Clip {clip_num}/{total_clips}", pct)
 
             clip_video_path = clips_list[i] if i < len(clips_list) else getattr(video_info, "video_path", None)
+
+            # Check if this clip was already fully completed in a previous run (Resume)
+            if clip_key in cached_clips and cached_clips[clip_key].strip():
+                script_part = cached_clips[clip_key].strip()
+                clip_scripts.append(script_part)
+                _logger.info("✅ Resumed Clip {}/{} from cache: '{}...'", clip_num, total_clips, script_part[:60])
+                continue
 
             frame_path = frames_dir / f"scene{i:04d}_frame00.jpg"
             if not frame_path.exists():
@@ -811,23 +868,26 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
             _logger.info("Processing review for clip {}/{} (Review Engine: {}, Write Engine: {})...", clip_num, total_clips, self._review_video_engine, self._write_content_engine)
 
-            # --- STAGE 1: Video Description ---
-            if self._review_video_engine == "gemini_web" and self._browser_mgr:
-                stage1_desc = self._get_stage1_desc_gemini_web(
-                    i, total_clips, job_id=job_id, clip_video_path=clip_video_path, progress_cb=progress_cb
-                )
-            elif self._review_video_engine == "openai_api":
-                stage1_desc = self._get_stage1_desc_openai_api(
-                    frame_path, i, total_clips, custom_instructions=custom_instructions
-                )
-            elif self._review_video_engine == "claude_api":
-                stage1_desc = self._get_stage1_desc_claude_api(
-                    frame_path, i, total_clips, custom_instructions=custom_instructions
-                )
+            # --- STAGE 1: Video Description (Gemini Only) ---
+            if clip_key in stage1_clips and stage1_clips[clip_key].strip():
+                stage1_desc = stage1_clips[clip_key].strip()
+                _logger.info("✅ Reused Stage 1 description for Clip {}/{} from cache", clip_num, total_clips)
             else:
-                stage1_desc = self._get_stage1_desc_gemini_api(
-                    frame_path, i, total_clips, custom_instructions=custom_instructions
-                )
+                if self._review_video_engine == "gemini_web" and self._browser_mgr:
+                    stage1_desc = self._get_stage1_desc_gemini_web(
+                        i, total_clips, job_id=job_id, clip_video_path=clip_video_path, progress_cb=progress_cb
+                    )
+                else:
+                    stage1_desc = self._get_stage1_desc_gemini_api(
+                        frame_path, i, total_clips, custom_instructions=custom_instructions
+                    )
+                
+                # Save Stage 1 description to cache
+                stage1_clips[clip_key] = stage1_desc
+                try:
+                    stage1_cache_file.write_text(json.dumps(stage1_clips, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as s1_err:
+                    _logger.warning("Could not write stage1_cache.json: {}", s1_err)
 
             # --- STAGE 2: Content Writing ---
             if self._write_content_engine == "openai_api":
@@ -847,6 +907,15 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     stage1_desc, i, total_clips, language=language, custom_instructions=custom_instructions
                 )
             
+            # Save successful clip to cache immediately
+            cached_clips[clip_key] = script_part
+            try:
+                clip_cache_file.write_text(json.dumps(cached_clips, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as cache_err:
+                _logger.warning("Could not write clip_cache.json: {}", cache_err)
+
+            clip_scripts.append(script_part)
+
             # ── Instantly push THIS clip's content to Google Sheet Webhook ──
             try:
                 import re

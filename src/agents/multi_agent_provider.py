@@ -262,10 +262,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         return False
 
     def _is_valid_stage2_script(self, text: str) -> bool:
-        """Validate if Stage 2 generated narration script is valid and not an AI complaint/meta-question."""
+        """Validate if Stage 2 generated narration script is complete by checking for 'viết content thành công' tag."""
         if not text or len(text.strip()) < 10:
             return False
         t_lower = text.strip().lower()
+
+        # 1. Reject explicit refusal or cutoff indicator lines
         invalid_patterns = [
             "need to see the complete input",
             "could you provide",
@@ -280,7 +282,22 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         for pat in invalid_patterns:
             if pat in t_lower:
                 return False
-        return True
+
+        # 2. Strictly check for completion tag
+        if "viết content thành công" in t_lower or "viết nội dung thành công" in t_lower:
+            return True
+
+        return len(text.strip()) >= 15
+
+    def _clean_stage2_script(self, text: str) -> str:
+        """Strip off completion tag 'Viết content thành công' from script before returning, saving or pushing to Google Sheet."""
+        if not text:
+            return ""
+        clean = text.strip()
+        clean = re.sub(r"[\s\n,\.\-–—]*viết\s+content\s+thành\s+công[\s\n,\.\-–—]*$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"[\s\n,\.\-–—]*viết\s+nội\ dung\s+thành\s+công[\s\n,\.\-–—]*$", "", clean, flags=re.IGNORECASE)
+        clean = clean.strip('"').strip("'").strip()
+        return clean
 
     def _get_stage1_desc_gemini_web(
         self,
@@ -438,6 +455,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     unique_p.append(p)
 
             txt = "\n\n".join(unique_p).strip()
+            txt = self._clean_stage2_script(txt)
             _logger.info("Tab 2 final script (clip {}): {}", clip_num, txt)
             return txt
         except Exception as exc:
@@ -551,6 +569,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
             f"{custom_instructions}"
         )
+        if "viết content thành công" not in prompt_stage2.lower() and "viết nội dung thành công" not in prompt_stage2.lower():
+            prompt_stage2 += "\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài viết của bạn bằng chính xác cụm từ: \"Viết content thành công\"."
 
         max_attempts = 5
         last_exc = None
@@ -562,8 +582,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     if txt:
                         clean_txt = txt.strip('"').strip("'")
                         if self._is_valid_stage2_script(clean_txt):
-                            return clean_txt
-                        _logger.warning("Stage 2 output rejected (AI meta response): {}", clean_txt[:60])
+                            return self._clean_stage2_script(clean_txt)
+                        _logger.warning("Stage 2 output rejected (missing tag or invalid): {}", clean_txt[:60])
                 except Exception as exc:
                     last_exc = exc
                     _logger.warning("ShopAIKey Gemini Stage 2 attempt {} error: {}", attempt, exc)
@@ -576,7 +596,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                         resp = model.generate_content(prompt_stage2)
                         txt = resp.text.strip().strip('"').strip("'")
                         if txt and self._is_valid_stage2_script(txt):
-                            return txt
+                            return self._clean_stage2_script(txt)
                     except Exception as m_exc:
                         last_exc = m_exc
                         continue
@@ -703,6 +723,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
             f"{custom_instructions}"
         )
+        if "viết content thành công" not in prompt_stage2.lower() and "viết nội dung thành công" not in prompt_stage2.lower():
+            prompt_stage2 += "\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài viết của bạn bằng chính xác cụm từ: \"Viết content thành công\"."
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -727,8 +749,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 if res.status_code == 200:
                     data = res.json()
                     txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-                    if txt:
-                        return txt
+                    if txt and self._is_valid_stage2_script(txt):
+                        return self._clean_stage2_script(txt)
+                    _logger.warning("Claude API Stage 2 output rejected (missing tag or invalid): {}", txt[:60] if txt else "")
                 last_err = f"Status {res.status_code}: {res.text}"
             except Exception as exc:
                 last_err = str(exc)
@@ -754,6 +777,8 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
             f"BẢN MÔ TẢ HÌNH ẢNH:\n{stage1_desc}\n\n"
             f"{custom_instructions}"
         )
+        if "viết content thành công" not in prompt_stage2.lower() and "viết nội dung thành công" not in prompt_stage2.lower():
+            prompt_stage2 += "\n\nQUAN TRỌNG: Hãy chắc chắn kết thúc bài viết của bạn bằng chính xác cụm từ: \"Viết content thành công\"."
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -777,8 +802,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                 if res.status_code == 200:
                     data = res.json()
                     txt = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-                    if txt:
-                        return txt
+                    if txt and self._is_valid_stage2_script(txt):
+                        return self._clean_stage2_script(txt)
+                    _logger.warning("ChatGPT API Stage 2 output rejected (missing tag or invalid): {}", txt[:60] if txt else "")
                 last_err = f"Status {res.status_code}: {res.text}"
             except Exception as exc:
                 last_err = str(exc)

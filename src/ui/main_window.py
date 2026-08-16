@@ -2723,8 +2723,24 @@ class MainWindow(ctk.CTk):
                 "Chưa có Cookie Gemini (Tab 2)",
                 "Bạn đã chọn Gemini Web để viết content nhưng chưa dán Cookie Gemini.\nVui lòng dán Cookie Gemini để tiếp tục.",
             )
-            self._on_import_cookie()
-            return
+        elif rev_engine == "gemini_api" or write_engine == "gemini_api":
+            has_gemini_key = bool((os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
+            if not has_gemini_key:
+                messagebox.showwarning(
+                    "Chưa Nhập API Key ⚠️",
+                    "Bạn đã chọn Gemini API nhưng chưa cấu hình API Key!\n\nVui lòng dán API Key của bạn để tiếp tục.",
+                )
+                self._on_import_gemini_api_key()
+                return
+        elif write_engine in ("openai_api", "chatgpt_api"):
+            has_openai_key = bool((os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip())
+            if not has_openai_key:
+                messagebox.showwarning(
+                    "Chưa Nhập API Key ⚠️",
+                    "Bạn đã chọn ChatGPT API nhưng chưa cấu hình API Key!\n\nVui lòng dán API Key để tiếp tục.",
+                )
+                self._on_import_gemini_api_key()
+                return
 
         # 3. Kiểm tra Webhook URL Google Sheet (bắt buộc nhập)
         sheet_webhook = self._sheet_webhook_var.get().strip() or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")

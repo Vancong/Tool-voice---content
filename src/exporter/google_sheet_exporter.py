@@ -154,6 +154,9 @@ class GoogleSheetExporter:
             sheet_rows.append({
                 "stt_video": stt,
                 "noi_dung_moi_viet": para_text,
+                "noi_dung": para_text,
+                "content": para_text,
+                "script": para_text,
                 "voice": voice_name,
             })
 
@@ -230,6 +233,9 @@ class GoogleSheetExporter:
         row = {
             "stt_video": stt,
             "noi_dung_moi_viet": content,
+            "noi_dung": content,
+            "content": content,
+            "script": content,
             "voice": voice_filename,
         }
         payload = {

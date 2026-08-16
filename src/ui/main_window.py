@@ -1604,27 +1604,14 @@ class MainWindow(ctk.CTk):
             text="⏹ Dừng",
             font=ctk.CTkFont(size=13, weight="bold"),
             height=36,
-            width=90,
+            width=100,
             fg_color=ACCENT_RED,
             hover_color=ACCENT_RED_HOVER,
             corner_radius=8,
             state="disabled",
             command=self._on_cancel,
         )
-        self._btn_cancel.pack(side="left", padx=(0, 8))
-
-        self._btn_clear_cache = ctk.CTkButton(
-            btn_bar,
-            text="🔄 Phân Tích Lại Thư Mục",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            height=36,
-            width=175,
-            fg_color="#d97706",
-            hover_color="#b45309",
-            corner_radius=8,
-            command=self._on_clear_cache_click,
-        )
-        self._btn_clear_cache.pack(side="left", padx=(0, 8))
+        self._btn_cancel.pack(side="left", padx=(0, 10))
 
         self._btn_open_folder = ctk.CTkButton(
             btn_bar,
@@ -2771,6 +2758,25 @@ class MainWindow(ctk.CTk):
         output_file = out_folder / f"{video_path.stem}_review.mp4"
         self._last_output_file = output_file
 
+        # Check if this job folder has previously completed cache and ask user if they want to re-analyze from scratch
+        job_dir = Path("data/jobs") / job_id
+        checkpoint_file = job_dir / "checkpoint.json"
+        checkpoints_dir = job_dir / "checkpoints"
+        if checkpoint_file.exists() or checkpoints_dir.exists():
+            import shutil
+            ask_clean = messagebox.askyesno(
+                "Dữ Liệu Đã Tồn Tại",
+                f"Thư mục '{video_path.name}' này đã có dữ liệu phân tích trước đó.\n\n"
+                "👉 Bạn có muốn XÓA DỮ LIỆU CŨ & BẮT ĐẦU PHÂN TÍCH LẠI THƯ MỤC NÀY từ đầu ngay bây giờ không?\n\n"
+                "• Chọn [Có] (Yes): Xóa dữ liệu cũ và phân tích lại từ Clip 1.\n"
+                "• Chọn [Không] (No): Tiếp tục dùng dữ liệu cũ."
+            )
+            if ask_clean:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                self._append_log(f"🔄 Đã xóa toàn bộ dữ liệu cũ của thư mục '{video_path.name}'. Đang bắt đầu phân tích lại từ Clip 1...")
+            else:
+                return
+
         # UI state transitions
         self._cancel_token.clear()
         self._btn_generate.configure(state="disabled", text="⏸️ Đang Chạy...")
@@ -2935,16 +2941,14 @@ class MainWindow(ctk.CTk):
             self._btn_open_folder.configure(state="normal")
             self._btn_open_analysis.configure(state="normal")
             if self._skip_media_var.get():
-                ask_clean = messagebox.askyesno(
+                messagebox.showinfo(
                     "Hoàn tất thành công! 🎉",
                     "🎉 Đã viết kịch bản & đẩy tự động toàn bộ nội dung lên Google Sheet thành công!\n\n"
                     "• Cột A (stt video): STT của clip (8, 12, 1...)\n"
                     "• Cột B (nội dung mới viết): Kịch bản review do AI viết\n"
                     "• Cột C (voice): Tên file mp3 tương ứng (08.mp3, 12.mp3, 1.mp3...)\n\n"
-                    "👉 Bạn có muốn ĐẶT LẠI DỮ LIỆU để lần sau phân tích lại thư mục này từ đầu không?"
+                    "👉 Bạn có thể mở Google Sheet kiểm tra kịch bản, sau đó bấm nút '⚡ Batch Voice Sheet' để tạo voice hàng loạt bất kỳ lúc nào!"
                 )
-                if ask_clean:
-                    self._clear_current_job_cache(silent=True)
             else:
                 messagebox.showinfo("Thành công", f"Đã tạo video review thành công!\n\nĐường dẫn:\n{self._last_output_file}")
         else:
@@ -2978,34 +2982,6 @@ class MainWindow(ctk.CTk):
         btn_text = "▶️ BẮT ĐẦU / TIẾP TỤC" if is_resume_ready else "🚀 BẮT ĐẦU REVIEW"
         self._btn_generate.configure(state="normal", text=btn_text, fg_color=ACCENT_GREEN)
         self._btn_cancel.configure(state="disabled")
-
-    def _clear_current_job_cache(self, silent: bool = False) -> None:
-        folder = self._input_video_var.get().strip()
-        if not folder:
-            if not silent:
-                messagebox.showwarning("Chưa chọn thư mục", "Vui lòng chọn thư mục video trước!")
-            return
-
-        import shutil
-        job_id = self._generate_job_id(folder)
-        job_dir = Path("data/jobs") / job_id
-        if job_dir.exists():
-            try:
-                shutil.rmtree(job_dir)
-                self._append_log(f"🔄 Đã sẵn sàng phân tích lại thư mục '{job_id}' từ Clip 1!")
-                if not silent:
-                    messagebox.showinfo("Đã Đặt Lại", f"🔄 Đã chuẩn bị xong!\n\nLần chạy tiếp theo hệ thống sẽ phân tích lại thư mục này từ Clip 1.")
-            except Exception as e:
-                self._append_log(f"⚠️ Không thể đặt lại dữ liệu: {e}")
-                if not silent:
-                    messagebox.showerror("Lỗi", f"Không thể đặt lại dữ liệu: {e}")
-        else:
-            if not silent:
-                messagebox.showinfo("Thông báo", "Thư mục này hiện tại chưa có dữ liệu cũ.")
-        self._reset_ui_state(is_resume_ready=False)
-
-    def _on_clear_cache_click(self) -> None:
-        self._clear_current_job_cache(silent=False)
 
     def _open_output_folder(self) -> None:
         target_dir = Path(self._output_var.get().strip()).resolve()

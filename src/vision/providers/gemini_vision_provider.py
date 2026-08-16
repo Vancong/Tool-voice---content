@@ -117,7 +117,42 @@ class GeminiVisionProvider(BaseVisionAnalyzer):
         except Exception as exc:
             raise ImageReadError(str(exc)) from exc
 
+    def _call_shopaikey_vision(self, images: List[Path], api_key: str, model: str = "gemini-2.5-flash") -> str:
+        import base64
+        import requests
+        url = f"https://api.shopaikey.com/v1beta/models/{model}:generateContent?key={api_key}"
+        parts = [{"text": self._prompt}]
+        for img_path in images:
+            if img_path and img_path.exists():
+                with open(img_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode("utf-8")
+                parts.append({"inlineData": {"mimeType": "image/jpeg", "data": b64_data}})
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"temperature": self._temperature, "maxOutputTokens": 2048}
+        }
+        res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=45)
+        if res.status_code == 200:
+            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        raise RuntimeError(f"ShopAIKey REST Error {res.status_code}: {res.text}")
+
     def _call_gemini(self, images: List[Path]) -> GenerationResponse:
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+        if api_key.startswith("sk-"):
+            models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+            last_exc = None
+            for m_name in models_to_try:
+                try:
+                    text_resp = self._call_shopaikey_vision(images, api_key, model=m_name)
+                    class SimpleResp:
+                        def __init__(self, text: str):
+                            self.text = text
+                    return SimpleResp(text_resp)
+                except Exception as exc:
+                    last_exc = exc
+                    self._logger.warning("ShopAIKey Vision model '{}' error: {}", m_name, exc)
+            raise VisionAPIError(str(last_exc))
+
         if genai is None:
             err_msg = (
                 f"Không tìm thấy package google-generativeai. Hãy chạy: pip install google-generativeai\n"
@@ -208,15 +243,13 @@ class GeminiVisionProvider(BaseVisionAnalyzer):
                     if parsed["emotion"]:
                         aggregated["emotion"] = parsed["emotion"]
 
-                duration_ms = (time.time() - start_ts) * 1000
                 return SceneAnalysis(
                     scene_index=scene_index,
                     summary=aggregated["summary"].strip(),
-                    objects=list(set(aggregated["objects"])),
-                    characters=list(set(aggregated["characters"])),
-                    actions=list(set(aggregated["actions"])),
-                    emotion=aggregated["emotion"],
-                    duration_ms=duration_ms,
+                    key_objects=list(set(aggregated["objects"])),
+                    key_characters=list(set(aggregated["characters"])),
+                    key_actions=list(set(aggregated["actions"])),
+                    dominant_emotion=aggregated["emotion"] or "neutral",
                 )
             except RateLimitError as rle:
                 attempt += 1
@@ -237,7 +270,7 @@ class GeminiVisionProvider(BaseVisionAnalyzer):
             frames = frame_extraction_result.frames
             if not frames:
                 job_logger.warning("No frames provided for vision analysis")
-                empty_res = VisionAnalysisResult(scenes=[], total_duration_ms=0.0)
+                empty_res = VisionAnalysisResult(scenes=[], processing_time=0.0)
                 return Result.Ok(empty_res)
 
             grouped = _group_frames_by_scene(frames)
@@ -258,7 +291,7 @@ class GeminiVisionProvider(BaseVisionAnalyzer):
             job_logger.info("Elapsed time: {:.2f}s", elapsed_sec)
             result = VisionAnalysisResult(
                 scenes=scene_analyses,
-                total_duration_ms=total_duration_ms,
+                processing_time=elapsed_sec,
             )
             job_logger.info("Completed vision analysis for {count} scenes in {dur:.2f}ms", count=len(scene_analyses), dur=total_duration_ms)
             return Result.Ok(result)

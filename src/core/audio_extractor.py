@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 from src.core.result import Result
 from src.core.video_loader import VideoLoader
 from src.utils.logger import get_logger
+from src.utils.runtime import get_ffmpeg_path
 
 _logger = get_logger("audio_extractor")
 
@@ -71,7 +72,7 @@ class AudioExtractor:
                     log.warning("Failed audio extraction for clip {}, generating silence fallback", clip.name)
                     # Generate 5s silence as fallback
                     silence_cmd = [
-                        "ffmpeg", "-y",
+                        get_ffmpeg_path(), "-y",
                         "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
                         "-t", "5",
                         "-c:a", "pcm_s16le",
@@ -87,7 +88,7 @@ class AudioExtractor:
                     f.write(f"file '{clip_wav.as_posix()}'\n")
 
             concat_cmd = [
-                "ffmpeg", "-y",
+                get_ffmpeg_path(), "-y",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(concat_txt),
@@ -100,7 +101,7 @@ class AudioExtractor:
                 log.warning("Audio concatenation failed or audio stream empty. Creating empty/silent audio track.")
                 # Create silent WAV
                 silence_cmd = [
-                    "ffmpeg", "-y",
+                    get_ffmpeg_path(), "-y",
                     "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
                     "-t", "10",
                     "-c:a", "pcm_s16le",
@@ -124,7 +125,7 @@ class AudioExtractor:
     ) -> Result[Path, Exception]:
         """Extract WAV from a single clip file."""
         ffmpeg_cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
             "-i", str(video_path),
             "-vn",
@@ -140,7 +141,7 @@ class AudioExtractor:
 
         # Fallback without explicit map if 0:a:0 failed
         ffmpeg_cmd_fallback = [
-            "ffmpeg", "-y",
+            get_ffmpeg_path(), "-y",
             "-i", str(video_path),
             "-vn",
             "-ac", "1",

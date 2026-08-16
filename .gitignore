@@ -23,3 +23,5 @@ scratch/
 test_whisper/
 .pytest_cache/
 models/
+ffmpeg/
+*.wav

@@ -22,21 +22,52 @@ def get_app_dir() -> Path:
         return Path(__file__).parent.parent.parent
 
 
+import shutil
+
 def get_ffmpeg_path() -> str:
     """Trả về đường dẫn tới ffmpeg.exe (bundled hoặc system PATH)."""
     app_dir = get_app_dir()
-    bundled = app_dir / "ffmpeg" / "ffmpeg.exe"
-    if bundled.exists():
-        return str(bundled)
+    candidates = [
+        app_dir / "ffmpeg" / "ffmpeg.exe",
+        app_dir / "ffmpeg" / "ffmpeg-win64.exe",
+        app_dir / "bin" / "ffmpeg.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+
+    sys_path = shutil.which("ffmpeg")
+    if sys_path:
+        return sys_path
+
+    known_paths = [
+        Path(os.path.expanduser(r"~\AppData\Local\ms-playwright\ffmpeg-1011\ffmpeg-win64.exe")),
+        Path(os.path.expanduser(r"~\AppData\Local\CapCut\Apps\9.2.0.3931\ffmpeg.exe")),
+        Path(os.path.expanduser(r"~\AppData\Local\CapCut\Apps\9.1.0.3879\ffmpeg.exe")),
+    ]
+    for kp in known_paths:
+        if kp.exists():
+            return str(kp)
+
     return "ffmpeg"  # fallback: dùng system PATH
 
 
 def get_ffprobe_path() -> str:
     """Trả về đường dẫn tới ffprobe.exe (bundled hoặc system PATH)."""
     app_dir = get_app_dir()
-    bundled = app_dir / "ffmpeg" / "ffprobe.exe"
-    if bundled.exists():
-        return str(bundled)
+    candidates = [
+        app_dir / "ffmpeg" / "ffprobe.exe",
+        app_dir / "bin" / "ffprobe.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+
+    sys_path = shutil.which("ffprobe")
+    if sys_path:
+        return sys_path
+
+    # If ffprobe is not installed separately, ffmpeg can often serve or we fallback to ffmpeg/ffprobe
     return "ffprobe"  # fallback: dùng system PATH
 
 

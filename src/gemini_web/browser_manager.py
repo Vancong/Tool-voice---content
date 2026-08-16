@@ -850,7 +850,7 @@ class BrowserManager:
         return self._on_browser_thread(self._verify_live_sessions_impl, review_video_engine, write_content_engine)
 
     def _verify_live_sessions_impl(self, review_video_engine: str = "gemini_web", write_content_engine: str = "chatgpt_web") -> bool:
-        self._logger.info("Performing live browser session verification for Tab 1 ({}) and Tab 2 ({})...", review_video_engine, write_content_engine)
+        self._logger.info("Performing live browser session verification for Review Engine: {}, Write Engine: {}", review_video_engine, write_content_engine)
 
         t1_name = "Google AI Studio" if review_video_engine == "google_ai_studio" else "Gemini Web"
         if write_content_engine == "claude_web":
@@ -860,19 +860,21 @@ class BrowserManager:
         else:
             t2_name = "Gemini Web"
 
-        # 1. Verify Tab 1
-        page1 = self.get_stage_page(1, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
-        if not self._is_page_authenticated_impl(page1, engine_type=review_video_engine):
-            self.save_dom_snapshot(page1, f"Tab 1 ({t1_name}) session unauthenticated", None)
-            raise GeminiWebAuthError(f"Phiên đăng nhập Tab 1 ({t1_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t1_name} mới!")
+        # 1. Verify Tab 1 ONLY if review video engine is browser-based
+        if review_video_engine in ("gemini_web", "google_ai_studio"):
+            page1 = self.get_stage_page(1, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
+            if not self._is_page_authenticated_impl(page1, engine_type=review_video_engine):
+                self.save_dom_snapshot(page1, f"Tab 1 ({t1_name}) session unauthenticated", None)
+                raise GeminiWebAuthError(f"Phiên đăng nhập Tab 1 ({t1_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t1_name} mới!")
 
-        # 2. Verify Tab 2
-        page2 = self.get_stage_page(2, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
-        if not self._is_page_authenticated_impl(page2, engine_type=write_content_engine):
-            self.save_dom_snapshot(page2, f"Tab 2 ({t2_name}) session unauthenticated", None)
-            raise GeminiWebAuthError(f"Phiên đăng nhập Tab 2 ({t2_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t2_name} mới!")
+        # 2. Verify Tab 2 ONLY if write content engine is browser-based
+        if write_content_engine in ("chatgpt_web", "claude_web"):
+            page2 = self.get_stage_page(2, write_content_engine=write_content_engine, review_video_engine=review_video_engine)
+            if not self._is_page_authenticated_impl(page2, engine_type=write_content_engine):
+                self.save_dom_snapshot(page2, f"Tab 2 ({t2_name}) session unauthenticated", None)
+                raise GeminiWebAuthError(f"Phiên đăng nhập Tab 2 ({t2_name}) đã hết hạn hoặc chưa đăng nhập (hiển thị màn hình Đăng nhập). Vui lòng dán Cookie {t2_name} mới!")
 
-        self._logger.info("✅ Live session verification succeeded for both Tab 1 ({}) and Tab 2 ({})!", t1_name, t2_name)
+        self._logger.info("✅ Live session verification succeeded for active web engines!")
         return True
 
     def _watchdog_check_and_recover(self, page: Page, timeout_sec: int = 15) -> bool:

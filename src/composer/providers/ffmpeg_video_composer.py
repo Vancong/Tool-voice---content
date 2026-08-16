@@ -36,6 +36,7 @@ from src.composer.models import VideoComposeRequest, VideoComposeResult, Compose
 from src.review.models import ReviewResult
 from src.utils.logger import get_logger
 from src.utils.thread_pool import ThreadPoolManager
+from src.utils.runtime import get_ffmpeg_path, get_ffprobe_path
 from src.config.settings import AppConfig, CONFIG
 
 
@@ -167,7 +168,7 @@ class FFmpegVideoComposer(BaseVideoComposer):
             video_input_args = ["-i", str(req.original_video)]
 
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
             *video_input_args,
             "-i", voice_path,
@@ -213,7 +214,7 @@ class FFmpegVideoComposer(BaseVideoComposer):
         """
         try:
             probe_cmd = [
-                "ffprobe",
+                get_ffprobe_path(),
                 "-v",
                 "error",
                 "-show_entries",
@@ -351,7 +352,7 @@ class FFmpegVideoComposer(BaseVideoComposer):
         """Check that FFmpeg is available on the system.
         """
         try:
-            subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run([get_ffmpeg_path(), "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             return Result.Ok(True)
         except Exception as exc:  # pragma: no cover – environment issue
             return Result.Err(VideoComposeError(str(exc)))

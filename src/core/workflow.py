@@ -368,7 +368,8 @@ class WorkflowEngine:
 
         frame_result = self._load_checkpoint(job_id, "FrameExtraction") if resume else None
         if frame_result is None:
-            if use_gemini_web:
+            rev_engine = getattr(self._review_generator, "_review_video_engine", "")
+            if use_gemini_web and rev_engine == "gemini_web":
                 from src.frame.models import FrameExtractionResult
                 log.info("Gemini Web mode active. Bypassing FrameExtraction stage.")
                 frame_result = FrameExtractionResult.empty()
@@ -394,9 +395,13 @@ class WorkflowEngine:
 
         vision_result = self._load_checkpoint(job_id, "VisionAnalysis") if resume else None
         if vision_result is None:
-            if use_gemini_web:
+            is_multi_agent = (
+                use_gemini_web
+                or type(self._review_generator).__name__ == "MultiAgentReviewProvider"
+            )
+            if is_multi_agent:
                 from src.vision.models import VisionAnalysisResult
-                log.info("Gemini Web mode active. Bypassing cloud Vision API.")
+                log.info("MultiAgent / Decoupled engine mode active. Bypassing separate cloud Vision API stage.")
                 vision_result = VisionAnalysisResult.empty()
             else:
                 r_vision = self._stage(

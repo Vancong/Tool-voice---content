@@ -118,7 +118,35 @@ class GeminiReviewProvider(BaseReviewGenerator):
         except Exception as exc:
             raise PromptError(f"Failed to render prompt template: {exc}") from exc
 
+    def _call_shopaikey_text(self, prompt: str, api_key: str, model: str = "gemini-2.5-flash") -> str:
+        import requests
+        url = f"https://api.shopaikey.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": self._temperature, "maxOutputTokens": 4096}
+        }
+        res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=45)
+        if res.status_code == 200:
+            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        raise RuntimeError(f"ShopAIKey REST Error {res.status_code}: {res.text}")
+
     def _call_gemini(self, prompt: str) -> GenerationResponse:
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+        if api_key.startswith("sk-"):
+            models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+            last_exc = None
+            for m_name in models_to_try:
+                try:
+                    text_resp = self._call_shopaikey_text(prompt, api_key, model=m_name)
+                    class SimpleResp:
+                        def __init__(self, text: str):
+                            self.text = text
+                    return SimpleResp(text_resp)
+                except Exception as exc:
+                    last_exc = exc
+                    self._logger.warning("ShopAIKey Review model '{}' error: {}", m_name, exc)
+            raise ReviewGenerationError(str(last_exc))
+
         if genai is None:
             err_msg = (
                 f"Không tìm thấy package google-generativeai. Hãy chạy: pip install google-generativeai\n"

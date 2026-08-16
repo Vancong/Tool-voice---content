@@ -93,11 +93,12 @@ class VideoLoader:
                 height = clip_h
 
         # Generate thumbnail using ffmpeg from the first clip
+        from src.utils.runtime import get_ffmpeg_path
         first_clip = clips[0]
         thumb_dir = video_path if video_path.is_dir() else video_path.parent
         thumb_path = thumb_dir / "thumbnail.jpg"
         ff_cmd = [
-            "ffmpeg",
+            get_ffmpeg_path(),
             "-y",
             "-i", str(first_clip),
             "-vf", "scale=320:180",

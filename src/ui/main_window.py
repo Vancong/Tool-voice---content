@@ -1022,19 +1022,42 @@ class MainWindow(ctk.CTk):
             fg_color=ACCENT_BLUE,
             hover_color=ACCENT_BLUE_HOVER,
         )
-        rb_rev_gemini.pack(side="left", padx=(0, 15))
+        rb_rev_gemini.pack(side="left", padx=(0, 10))
 
-        # Tạm thời ẩn Google AI Studio theo yêu cầu người dùng
-        # rb_rev_aistudio = ctk.CTkRadioButton(
-        #     row1,
-        #     text="Google AI Studio",
-        #     variable=self._review_video_engine_var,
-        #     value="google_ai_studio",
-        #     font=ctk.CTkFont(size=11, weight="bold"),
-        #     fg_color=ACCENT_BLUE,
-        #     hover_color=ACCENT_BLUE_HOVER,
-        # )
-        # rb_rev_aistudio.pack(side="left")
+        rb_rev_gemini_api = ctk.CTkRadioButton(
+            row1,
+            text="Gemini API",
+            variable=self._review_video_engine_var,
+            value="gemini_api",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color=ACCENT_BLUE_HOVER,
+        )
+        rb_rev_gemini_api.pack(side="left", padx=(0, 10))
+
+        rb_rev_claude_api = ctk.CTkRadioButton(
+            row1,
+            text="Claude API",
+            variable=self._review_video_engine_var,
+            value="claude_api",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_BLUE,
+            hover_color=ACCENT_BLUE_HOVER,
+        )
+        rb_rev_claude_api.pack(side="left")
+
+        self._btn_test_api_inline = ctk.CTkButton(
+            row1,
+            text="⚡ Test API Key",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            height=22,
+            width=100,
+            corner_radius=5,
+            command=self._on_test_gemini_api_key_inline,
+        )
+        self._btn_test_api_inline.pack(side="left", padx=(12, 0))
 
         # Dòng 2: Viết content
         row2 = ctk.CTkFrame(engines_frame, fg_color="transparent")
@@ -1060,17 +1083,6 @@ class MainWindow(ctk.CTk):
         )
         rb_content_chatgpt.pack(side="left", padx=(0, 10))
 
-        rb_content_gemini = ctk.CTkRadioButton(
-            row2,
-            text="Gemini Web",
-            variable=self._write_content_engine_var,
-            value="gemini_web",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=ACCENT_GREEN,
-            hover_color=ACCENT_GREEN_HOVER,
-        )
-        rb_content_gemini.pack(side="left", padx=(0, 10))
-
         rb_content_claude = ctk.CTkRadioButton(
             row2,
             text="Claude Web",
@@ -1080,7 +1092,40 @@ class MainWindow(ctk.CTk):
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
         )
-        rb_content_claude.pack(side="left")
+        rb_content_claude.pack(side="left", padx=(0, 10))
+
+        rb_content_gemini_api = ctk.CTkRadioButton(
+            row2,
+            text="Gemini API",
+            variable=self._write_content_engine_var,
+            value="gemini_api",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_gemini_api.pack(side="left", padx=(0, 10))
+
+        rb_content_chatgpt_api = ctk.CTkRadioButton(
+            row2,
+            text="ChatGPT API",
+            variable=self._write_content_engine_var,
+            value="openai_api",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_chatgpt_api.pack(side="left", padx=(0, 10))
+
+        rb_content_claude_api = ctk.CTkRadioButton(
+            row2,
+            text="Claude API",
+            variable=self._write_content_engine_var,
+            value="claude_api",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+        )
+        rb_content_claude_api.pack(side="left")
 
         # Gemini Web Session Bar
         self._web_session_card = ctk.CTkFrame(ai_card, fg_color="transparent")
@@ -1134,7 +1179,7 @@ class MainWindow(ctk.CTk):
         )
         self._lbl_status_claude.pack(side="left")
 
-        # 4 Actions (1 row)
+        # Action Buttons (1 row)
         btn_action_row = ctk.CTkFrame(self._web_session_card, fg_color="transparent")
         btn_action_row.pack(fill="x", pady=(0, 2))
 
@@ -1174,9 +1219,21 @@ class MainWindow(ctk.CTk):
         )
         self._btn_import_claude_cookie.pack(side="left", padx=(0, 4), expand=True, fill="x")
 
+        self._btn_gemini_api_key = ctk.CTkButton(
+            btn_action_row,
+            text="🔑 API Gemini",
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=26,
+            corner_radius=6,
+            command=self._on_import_gemini_api_key,
+        )
+        self._btn_gemini_api_key.pack(side="left", padx=(0, 4), expand=True, fill="x")
+
         self._btn_test_gemini = ctk.CTkButton(
             btn_action_row,
-            text="⚡ Test Kết Nối",
+            text="⚡ Test API Gemini",
             fg_color=ACCENT_GREEN,
             hover_color=ACCENT_GREEN_HOVER,
             font=ctk.CTkFont(size=11, weight="bold"),
@@ -1679,12 +1736,19 @@ class MainWindow(ctk.CTk):
         has_gemini = sm.has_session_file()
         has_chatgpt = sm.has_chatgpt_session()
         has_claude = sm.has_claude_session()
+        has_api_key = bool(os.getenv("GEMINI_API_KEY", "").strip())
 
         if hasattr(self, "_lbl_status_gemini"):
-            if has_gemini:
-                self._lbl_status_gemini.configure(text="Gemini: Ready ✓", text_color=ACCENT_GREEN)
+            if self._review_video_engine_var.get() == "gemini_api":
+                if has_api_key:
+                    self._lbl_status_gemini.configure(text="Gemini API: Key OK ✓", text_color=ACCENT_GREEN)
+                else:
+                    self._lbl_status_gemini.configure(text="Gemini API: Chưa có Key ❌", text_color=ACCENT_RED)
             else:
-                self._lbl_status_gemini.configure(text="Gemini: Chưa dán ❌", text_color=ACCENT_RED)
+                if has_gemini:
+                    self._lbl_status_gemini.configure(text="Gemini Web: Ready ✓", text_color=ACCENT_GREEN)
+                else:
+                    self._lbl_status_gemini.configure(text="Gemini Web: Chưa dán ❌", text_color=ACCENT_RED)
 
         if hasattr(self, "_lbl_status_chatgpt"):
             if has_chatgpt:
@@ -1699,12 +1763,12 @@ class MainWindow(ctk.CTk):
                 self._lbl_status_claude.configure(text="Claude: Chưa dán ❌", text_color=ACCENT_RED)
 
         if hasattr(self, "_lbl_hdr_status"):
-            if has_gemini and (has_chatgpt or has_claude):
-                self._lbl_hdr_status.configure(text="● 2-Tab Ready", text_color=ACCENT_GREEN)
-            elif has_gemini or has_chatgpt or has_claude:
-                self._lbl_hdr_status.configure(text="● Đã dán 1 phần Session", text_color="#f59e0b")
+            if (has_gemini or has_api_key) and (has_chatgpt or has_claude or has_api_key):
+                self._lbl_hdr_status.configure(text="● Ready", text_color=ACCENT_GREEN)
+            elif has_gemini or has_chatgpt or has_claude or has_api_key:
+                self._lbl_hdr_status.configure(text="● Đã dán 1 phần Session/Key", text_color="#f59e0b")
             else:
-                self._lbl_hdr_status.configure(text="● Chưa dán Cookie", text_color=ACCENT_RED)
+                self._lbl_hdr_status.configure(text="● Chưa dán Cookie / Key", text_color=ACCENT_RED)
 
     def _on_import_cookie(self) -> None:
         """Show modal dialog for pasting Gemini cookies."""
@@ -1996,6 +2060,172 @@ class MainWindow(ctk.CTk):
             command=dialog.destroy,
         ).pack(side="right")
 
+    def _on_import_gemini_api_key(self) -> None:
+        """Show modal dialog for setting and testing Gemini API Key."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("🔑 Tích Hợp & Kiểm Tra Gemini API Key")
+        dialog.geometry("640x380")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.focus_force()
+
+        ctk.CTkLabel(
+            dialog,
+            text="🔑 Tích Hợp & Kiểm Tra Gemini API Key",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT_ACCENT,
+        ).pack(anchor="w", padx=16, pady=(14, 4))
+
+        ctk.CTkLabel(
+            dialog,
+            text="Dán Gemini API Key của bạn từ Google AI Studio (https://aistudio.google.com/) vào ô bên dưới:\n(Ví dụ key chuẩn có dạng: AIzaSy...)",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            wraplength=600,
+            justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        entry_key = ctk.CTkEntry(
+            dialog,
+            placeholder_text="Dán Gemini API Key vào đây (ví dụ: AIzaSy...)...",
+            font=ctk.CTkFont(size=12),
+            fg_color=BG_INPUT,
+            border_color=BORDER_INPUT,
+            height=36,
+            corner_radius=8,
+        )
+        entry_key.pack(fill="x", padx=16, pady=(0, 10))
+
+        current_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if current_key:
+            entry_key.insert(0, current_key)
+
+        lbl_status = ctk.CTkLabel(
+            dialog,
+            text="Nhấn 'Kiểm Tra Kết Nối' để xác thực API Key...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=TEXT_SECONDARY,
+            wraplength=600,
+            justify="left",
+        )
+        lbl_status.pack(anchor="w", padx=16, pady=(0, 14))
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+
+        def _do_test_and_save():
+            raw_key = entry_key.get().strip()
+            if not raw_key:
+                messagebox.showwarning("Cảnh báo", "Vui lòng nhập Gemini API Key!", parent=dialog)
+                return
+
+            btn_test.configure(state="disabled", text="⏳ Đang test...")
+            lbl_status.configure(text="⏳ Đang gửi request test tới Google Gemini API...", text_color="#f59e0b")
+
+            def _worker():
+                from src.utils.gemini_api_tester import verify_gemini_api_key
+                res = verify_gemini_api_key(raw_key)
+
+                def _ui_done():
+                    btn_test.configure(state="normal", text="⚡ Kiểm Tra Kết Nối")
+                    if res.is_ok:
+                        model_name, available_models = res.unwrap()
+                        lbl_status.configure(
+                            text=f"✅ KẾT NỐI THÀNH CÔNG!\nModel hoạt động: {model_name}",
+                            text_color=ACCENT_GREEN,
+                        )
+                        _update_env_file({"GEMINI_API_KEY": raw_key})
+                        os.environ["GEMINI_API_KEY"] = raw_key
+                        CONFIG.gemini_api_key = raw_key
+                        self._gemini_api_key_var.set(raw_key)
+                        self._refresh_gemini_status()
+                        self._append_log(f"🔑 [Gemini API Key] Kiểm tra & lưu API Key thành công! (Model: {model_name})")
+                        messagebox.showinfo(
+                            "Kết Nối Thành Công ✓",
+                            f"🎉 Gemini API Key hợp lệ và kết nối thành công!\n\n"
+                            f"Model hoạt động: {model_name}\n"
+                            f"Đã tự động lưu Key vào file .env!",
+                            parent=dialog,
+                        )
+                    else:
+                        err_msg = res.error
+                        lbl_status.configure(
+                            text=f"❌ KẾT NỐI THẤT BẠI!\n{err_msg}",
+                            text_color=ACCENT_RED,
+                        )
+                        self._append_log(f"❌ [Gemini API Key] Lỗi xác thực: {err_msg}")
+                        messagebox.showerror(
+                            "Kết Nối Thất Bại ❌",
+                            f"Không thể kết nối đến Gemini API Key:\n\n{err_msg}",
+                            parent=dialog,
+                        )
+
+                self.after(0, _ui_done)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        btn_test = ctk.CTkButton(
+            btn_row,
+            text="⚡ Kiểm Tra Kết Nối",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_HOVER,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=34,
+            command=_do_test_and_save,
+        )
+        btn_test.pack(side="right", padx=(8, 0))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Đóng",
+            fg_color=ACCENT_SLATE,
+            hover_color=ACCENT_SLATE_HOVER,
+            font=ctk.CTkFont(size=12),
+            height=34,
+            command=dialog.destroy,
+        ).pack(side="right")
+
+    def _on_test_gemini_api_key_inline(self) -> None:
+        """Inline test for Gemini API Key right next to the Gemini API Key radio button."""
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            messagebox.showwarning(
+                "Chưa có Gemini API Key",
+                "Bạn chưa nhập GEMINI_API_KEY!\n\nHệ thống sẽ mở hộp thoại để bạn dán Key.",
+            )
+            self._on_import_gemini_api_key()
+            return
+
+        self._append_log("⚡ Đang kiểm tra kết nối Gemini API Key...")
+        if hasattr(self, "_btn_test_api_inline"):
+            self._btn_test_api_inline.configure(state="disabled", text="⏳ Testing...")
+
+        def _worker():
+            from src.utils.gemini_api_tester import verify_gemini_api_key
+            res = verify_gemini_api_key(api_key)
+
+            def _ui_done():
+                if hasattr(self, "_btn_test_api_inline"):
+                    self._btn_test_api_inline.configure(state="normal", text="⚡ Test API Key")
+                if res.is_ok:
+                    model_name, _ = res.unwrap()
+                    self._append_log(f"✅ Gemini API Key kết nối thành công! (Model: {model_name})")
+                    messagebox.showinfo(
+                        "Kết Nối API Thành Công ✓",
+                        f"🎉 Gemini API Key hợp lệ và kết nối thành công!\n\nModel hoạt động: {model_name}",
+                    )
+                else:
+                    err_msg = res.error
+                    self._append_log(f"❌ Gemini API Key kết nối thất bại: {err_msg}")
+                    messagebox.showerror(
+                        "Kết Nối API Thất Bại ❌",
+                        f"Gemini API Key không hợp lệ hoặc bị lỗi kết nối:\n\n{err_msg}",
+                    )
+
+            self.after(0, _ui_done)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _on_clear_session(self) -> None:
         if messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa phiên đăng nhập Gemini đã lưu?"):
             self._gemini_web_provider.clear_session()
@@ -2006,6 +2236,47 @@ class MainWindow(ctk.CTk):
     def _on_test_gemini(self, auto: bool = False) -> None:
         write_engine = self._write_content_engine_var.get()
         review_engine = self._review_video_engine_var.get()
+
+        if review_engine == "gemini_api" or write_engine == "gemini_api":
+            api_key = os.getenv("GEMINI_API_KEY", "").strip()
+            if not api_key:
+                messagebox.showwarning(
+                    "Cảnh báo API Key",
+                    "Bạn đang chọn chế độ Gemini API nhưng chưa nhập GEMINI_API_KEY!\nVui lòng bấm nút '🔑 API Gemini' để dán Key.",
+                )
+                return
+
+            self._append_log("⚡ Đang kiểm tra kết nối Gemini API Key...")
+            self._btn_test_gemini.configure(state="disabled")
+
+            def _api_test_task():
+                from src.utils.gemini_api_tester import verify_gemini_api_key
+                res = verify_gemini_api_key(api_key)
+
+                def _ui_res():
+                    self._btn_test_gemini.configure(state="normal")
+                    if res.is_ok:
+                        model_name, _ = res.unwrap()
+                        self._append_log(f"✅ Gemini API Key kết nối thành công! (Model: {model_name})")
+                        if not auto:
+                            messagebox.showinfo(
+                                "Kết Nối Thành Công ✓",
+                                f"🎉 Gemini API Key hoạt động bình thường!\n\nModel test: {model_name}",
+                            )
+                    else:
+                        err_msg = res.error
+                        self._append_log(f"❌ Gemini API Key kết nối thất bại: {err_msg}")
+                        if not auto:
+                            messagebox.showerror(
+                                "Kết Nối Thất Bại ❌",
+                                f"Gemini API Key không hợp lệ hoặc bị lỗi kết nối:\n\n{err_msg}",
+                            )
+
+                self.after(0, _ui_res)
+
+            threading.Thread(target=_api_test_task, daemon=True).start()
+            return
+
         t1_name = "Google AI Studio" if review_engine == "google_ai_studio" else "Gemini Web"
         if write_engine == "claude_web":
             t2_name = "Claude Web"
@@ -2426,10 +2697,12 @@ class MainWindow(ctk.CTk):
             return
 
         video_path = Path(video_path)
-        engine_mode = "gemini_web"
-        is_web_mode = True
+        rev_engine = self._review_video_engine_var.get()
+        write_engine = self._write_content_engine_var.get()
+        engine_mode = f"{rev_engine}+{write_engine}"
+        is_web_mode = (rev_engine == "gemini_web" or write_engine in ("chatgpt_web", "gemini_web", "claude_web"))
 
-        # 1. Kiểm tra session Tab 1 (Mô tả Video)
+        # 1. Kiểm tra session Tab 1 (Mô tả Video) nếu dùng Gemini Web
         sm = self._gemini_web_provider.session_manager
         rev_engine = self._review_video_engine_var.get()
         if rev_engine == "gemini_web" and not sm.has_session_file():

@@ -2758,18 +2758,17 @@ class MainWindow(ctk.CTk):
         output_file = out_folder / f"{video_path.stem}_review.mp4"
         self._last_output_file = output_file
 
-        # Check if this job folder has previously completed cache and ask user if they want to re-analyze from scratch
+        # Check if this job folder has been 100% completed previously
         job_dir = Path("data/jobs") / job_id
-        checkpoint_file = job_dir / "checkpoint.json"
-        checkpoints_dir = job_dir / "checkpoints"
-        if checkpoint_file.exists() or checkpoints_dir.exists():
+        completed_tag = job_dir / "JOB_COMPLETED.tag"
+        if completed_tag.exists():
             import shutil
             ask_clean = messagebox.askyesno(
                 "Dữ Liệu Đã Tồn Tại",
-                f"Thư mục '{video_path.name}' này đã có dữ liệu phân tích trước đó.\n\n"
+                f"Thư mục '{video_path.name}' này đã được phân tích HOÀN TẤT trước đó.\n\n"
                 "👉 Bạn có muốn XÓA DỮ LIỆU CŨ & BẮT ĐẦU PHÂN TÍCH LẠI THƯ MỤC NÀY từ đầu ngay bây giờ không?\n\n"
                 "• Chọn [Có] (Yes): Xóa dữ liệu cũ và phân tích lại từ Clip 1.\n"
-                "• Chọn [Không] (No): Tiếp tục dùng dữ liệu cũ."
+                "• Chọn [Không] (No): Hủy thao tác."
             )
             if ask_clean:
                 shutil.rmtree(job_dir, ignore_errors=True)
@@ -2934,6 +2933,14 @@ class MainWindow(ctk.CTk):
             self._multi_agent_provider._tabs_initialized = False
 
         if result.is_ok:
+            if self._last_job_id:
+                try:
+                    job_dir = Path("data/jobs") / self._last_job_id
+                    if job_dir.exists():
+                        (job_dir / "JOB_COMPLETED.tag").touch()
+                except Exception as tag_err:
+                    _logger.warning("Could not create JOB_COMPLETED.tag: {}", tag_err)
+
             self._reset_ui_state(is_resume_ready=False)
             self._progress_bar.set(1.0)
             self._lbl_pct.configure(text="100%")

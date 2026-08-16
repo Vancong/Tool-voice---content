@@ -2737,6 +2737,16 @@ class MainWindow(ctk.CTk):
             self._on_import_cookie()
             return
 
+        # 3. Kiểm tra Webhook URL Google Sheet (bắt buộc nhập)
+        sheet_webhook = self._sheet_webhook_var.get().strip() or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
+        if not sheet_webhook:
+            messagebox.showwarning(
+                "Chưa Nhập Webhook URL ⚠️",
+                "Vui lòng nhập Webhook URL Google Sheet trước khi bắt đầu review!\n\n"
+                "Hệ thống cần Webhook URL để tự động đẩy kịch bản lên Google Sheet.",
+            )
+            return
+
         # Check TTS ElevenLabs
         selected_voice = self._voice_var.get().strip()
         is_eleven = "ElevenLabs" in selected_voice

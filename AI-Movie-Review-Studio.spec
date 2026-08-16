@@ -32,9 +32,10 @@ ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
 # Playwright driver files
 pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
 
-# faster-whisper & ctranslate2
+# faster-whisper & ctranslate2 & huggingface_hub
 fw_datas, fw_binaries, fw_hiddenimports = collect_all("faster_whisper")
 ct_datas, ct_binaries, ct_hiddenimports = collect_all("ctranslate2")
+hf_datas, hf_binaries, hf_hiddenimports = collect_all("huggingface_hub")
 
 # pydantic-settings
 pydantic_datas = collect_data_files("pydantic_settings")
@@ -49,15 +50,17 @@ all_datas = (
     + pw_datas
     + fw_datas
     + ct_datas
+    + hf_datas
     + pydantic_datas
     + project_datas
 )
-all_binaries = ctk_binaries + pw_binaries + fw_binaries + ct_binaries
+all_binaries = ctk_binaries + pw_binaries + fw_binaries + ct_binaries + hf_binaries
 all_hiddenimports = list(set(
     ctk_hiddenimports
     + pw_hiddenimports
     + fw_hiddenimports
     + ct_hiddenimports
+    + hf_hiddenimports
     + [
         "playwright",
         "playwright.sync_api",
@@ -66,6 +69,7 @@ all_hiddenimports = list(set(
         "customtkinter",
         "faster_whisper",
         "ctranslate2",
+        "huggingface_hub",
         "PIL._tkinter_finder",
         "PIL.ImageTk",
         "tkinter",
@@ -121,7 +125,6 @@ a = Analysis(
         "torchaudio",
         "torchvision",
         "transformers",
-        "huggingface_hub",
         "matplotlib",
         "numpy.tests",
         "scipy",

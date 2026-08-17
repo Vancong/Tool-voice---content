@@ -9,6 +9,7 @@ Khoảnh khắc đắt giá nhất: [Xác định chi tiết bất ngờ, đáng
 Biểu cảm và ngôn ngữ cơ thể: [Mô tả ánh mắt, tư thế, chuyển động, khoảng cách và phản ứng của các nhân vật]
 Mối tương tác trong cảnh: [Mô tả con vật tương tác với người, máy quay, đồ vật hoặc con vật khác như thế nào]
 Yếu tố an toàn: [Ghi lại cảnh có động vật hoang dã, khoảng cách gần, hành động nguy hiểm hoặc chi tiết không nên bắt chước]
+Watermark / Text trên video: [Ghi rõ chữ, logo, ID channel, watermark hoặc caption ở góc màn hình nếu có (ví dụ: @username, POV:...), trường hợp không có thì trả về không có]
 Thông tin chưa chắc chắn: [Ghi rõ tên loài, mối quan hệ, địa điểm hoặc hành động chưa thể xác nhận]
 Rule bắt buộc:
 Chỉ mô tả những gì nhìn thấy trong video.

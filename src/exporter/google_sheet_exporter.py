@@ -37,8 +37,8 @@ function doPost(e) {
 
     // Ensure header row exists
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["stt video", "nội dung mới viết", "voice"]);
-      var headerRange = sheet.getRange(1, 1, 1, 3);
+      sheet.appendRow(["stt video", "nội dung mới viết", "watermark", "voice"]);
+      var headerRange = sheet.getRange(1, 1, 1, 4);
       headerRange.setBackground("#1e293b");
       headerRange.setFontColor("#ffffff");
       headerRange.setFontWeight("bold");
@@ -53,6 +53,7 @@ function doPost(e) {
       var newSttNum = Number(newSttStr);
       var lastRow = sheet.getLastRow();
       var found = false;
+      var watermarkVal = rows[0].watermark || rows[0].watermark_text || rows[0].chu_goc_man_hinh || "";
 
       if (newSttStr && lastRow > 1) {
         var sttCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
@@ -63,9 +64,10 @@ function doPost(e) {
 
           if (cellValStr === newSttStr || (!isNaN(newSttNum) && !isNaN(cellValNum) && newSttNum === cellValNum)) {
             // Update existing row in-place
-            sheet.getRange(r + 2, 1, 1, 3).setValues([[
+            sheet.getRange(r + 2, 1, 1, 4).setValues([[
               newSttRaw,
               rows[0].noi_dung_moi_viet || "",
+              watermarkVal,
               rows[0].voice || ""
             ]]);
             found = true;
@@ -77,6 +79,7 @@ function doPost(e) {
         sheet.appendRow([
           rows[0].stt_video || "",
           rows[0].noi_dung_moi_viet || "",
+          watermarkVal,
           rows[0].voice || ""
         ]);
       }
@@ -84,9 +87,11 @@ function doPost(e) {
       // Batch mode: append all rows
       for (var i = 0; i < rows.length; i++) {
         var r2 = rows[i];
+        var wmVal = r2.watermark || r2.watermark_text || r2.chu_goc_man_hinh || "";
         sheet.appendRow([
           r2.stt_video || (i + 1),
           r2.noi_dung_moi_viet || "",
+          wmVal,
           r2.voice || ""
         ]);
       }
@@ -115,9 +120,10 @@ class GoogleSheetExporter:
         output_dir: Optional[Path] = None,
         video_info: Optional[Any] = None,
         push_webhook: bool = True,
+        watermarks: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Sync review data and scenes to Google Sheet and local CSV matching table format:
-        [stt video, nội dung mới viết, voice]
+        [stt video, nội dung mới viết, watermark, voice]
         """
         import os
         import re
@@ -146,6 +152,7 @@ class GoogleSheetExporter:
                     stt = digits[-1]
             
             para_text = paragraphs[i] if i < len(paragraphs) else ""
+            wm_text = watermarks[i] if (watermarks and i < len(watermarks)) else ""
             if stt.isdigit():
                 voice_name = f"AT-{int(stt):02d}.mp3"
             else:
@@ -157,6 +164,9 @@ class GoogleSheetExporter:
                 "noi_dung": para_text,
                 "content": para_text,
                 "script": para_text,
+                "watermark": wm_text,
+                "watermark_text": wm_text,
+                "chu_goc_man_hinh": wm_text,
                 "voice": voice_name,
             })
 
@@ -171,7 +181,7 @@ class GoogleSheetExporter:
         with csv_file.open("w", newline="", encoding="utf-8-sig") as fh:
             writer = csv.DictWriter(
                 fh,
-                fieldnames=["stt video", "nội dung mới viết", "voice"],
+                fieldnames=["stt video", "nội dung mới viết", "watermark", "voice"],
                 extrasaction="ignore",
             )
             writer.writeheader()
@@ -179,6 +189,7 @@ class GoogleSheetExporter:
                 writer.writerow({
                     "stt video": r["stt_video"],
                     "nội dung mới viết": r["noi_dung_moi_viet"],
+                    "watermark": r.get("watermark", ""),
                     "voice": r["voice"],
                 })
         _logger.info("Saved local batch clip CSV export to: {}", csv_file)
@@ -224,18 +235,28 @@ class GoogleSheetExporter:
         voice_filename: str,
         webhook_url: Optional[str] = None,
         job_id: str = "live",
+        watermark: str = "",
     ) -> bool:
-        """Immediately push a single finished clip's content to Google Sheet Webhook."""
+        """Immediately push a single finished clip's content to Google Sheet Webhook synchronously."""
+        import os
+        import time
         webhook_target = webhook_url or os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
         if not webhook_target or not webhook_target.startswith("http"):
+            _logger.warning("⚠️ Không có Webhook URL hợp lệ để push real-time Clip {}!", stt)
             return False
 
+        # Clean content: ensure it is a single well-formatted string
+        clean_content = (content or "").strip()
+
         row = {
-            "stt_video": stt,
-            "noi_dung_moi_viet": content,
-            "noi_dung": content,
-            "content": content,
-            "script": content,
+            "stt_video": str(stt),
+            "noi_dung_moi_viet": clean_content,
+            "noi_dung": clean_content,
+            "content": clean_content,
+            "script": clean_content,
+            "watermark": (watermark or "").strip(),
+            "watermark_text": (watermark or "").strip(),
+            "chu_goc_man_hinh": (watermark or "").strip(),
             "voice": voice_filename,
         }
         payload = {
@@ -244,18 +265,21 @@ class GoogleSheetExporter:
             "rows": [row],
         }
 
-        def _do_post():
+        for attempt in range(1, 4):
             try:
-                _logger.info("Live-syncing Clip {} content to Google Sheet Webhook...", stt)
-                res = requests.post(webhook_target, json=payload, timeout=15, allow_redirects=True)
+                _logger.info("⚡ Live-syncing Clip {} content to Google Sheet Webhook (Lần thử {}/3)...", stt, attempt)
+                res = requests.post(webhook_target, json=payload, timeout=20, allow_redirects=True)
                 if res.status_code in (200, 302):
-                    _logger.info("Successfully live-synced Clip {} content to Google Sheet!", stt)
+                    _logger.info("✅ Đã live-sync Clip {} thành công sang Google Sheet!", stt)
+                    return True
                 else:
-                    _logger.warning("Live sync Clip {} returned HTTP {}: {}", stt, res.status_code, res.text)
+                    _logger.warning("Live sync Clip {} attempt {}/3 HTTP {}: {}", stt, attempt, res.status_code, res.text[:200])
             except Exception as exc:
-                _logger.warning("Failed live-syncing Clip {} to Google Sheet: {}", stt, exc)
+                _logger.warning("Lỗi live-sync Clip {} (lần thử {}/3): {}", stt, attempt, exc)
+            if attempt < 3:
+                time.sleep(1.0)
 
-        import threading
-        threading.Thread(target=_do_post, daemon=True).start()
-        return True
+        _logger.error("❌ Không thể live-sync Clip {} sang Google Sheet sau 3 lần thử!", stt)
+        return False
+
 

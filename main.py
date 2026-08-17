@@ -38,12 +38,6 @@ def _run_cli() -> int:
     from src.core.result import Result
     from src.core.video_loader import VideoLoader
     from src.core.workflow import WorkflowEngine
-    from src.stt.providers.faster_whisper_provider import FasterWhisperProvider
-    from src.scene.providers.pyscenedetect_provider import PySceneDetectProvider
-    from src.frame.providers.opencv_frame_provider import OpenCVFrameProvider
-    from src.vision.providers.gemini_vision_provider import GeminiVisionProvider
-    from src.timeline.providers.timeline_builder import TimelineBuilderProvider
-    from src.review.providers.gemini_review_provider import GeminiReviewProvider
     from src.gemini_web.gemini_web_provider import GeminiWebProvider
     from src.agents.multi_agent_provider import MultiAgentReviewProvider
     from src.tts.providers.capcut_tts_provider import CapCutTTSProvider
@@ -97,11 +91,6 @@ def _run_cli() -> int:
     cancel_token = threading.Event()
     engine = WorkflowEngine(
         video_loader=VideoLoader(),
-        stt=FasterWhisperProvider(config=CONFIG),
-        scene_detector=PySceneDetectProvider(config=CONFIG),
-        frame_extractor=OpenCVFrameProvider(config=CONFIG),
-        vision_analyzer=GeminiVisionProvider(config=CONFIG),
-        timeline_builder=TimelineBuilderProvider(config=CONFIG),
         review_generator=review_gen,
         tts=CapCutTTSProvider(config=CONFIG),
         video_composer=FFmpegVideoComposer(config=CONFIG),

@@ -54,7 +54,10 @@ class VideoLoader:
         elif path.is_dir():
             clips = [
                 p for p in path.iterdir()
-                if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+                if p.is_file() 
+                and p.suffix.lower() in SUPPORTED_EXTENSIONS
+                and not p.name.endswith("_opt.mp4")
+                and not p.name.startswith(".")
             ]
             clips.sort(key=_natural_sort_key)
             if not clips:

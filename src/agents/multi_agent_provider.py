@@ -9,6 +9,7 @@ import os
 import time
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional, Any, Callable, List
 
@@ -247,9 +248,12 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
     @staticmethod
     def _strip_stage2_tag(text: str) -> str:
         """Xóa tag 'Viết content thành công' khỏi nội dung trước khi lưu/push."""
-        lines = text.strip().splitlines()
-        clean_lines = [l for l in lines if "viết content thành công" not in l.lower()]
-        return "\n".join(clean_lines).strip()
+        if not text:
+            return ""
+        import re
+        cleaned = re.sub(r'(?i)[\s\.,]*viết\s+content\s+thành\s+công[\s\.,]*', '', text).strip()
+        return cleaned.strip('"').strip("'").strip()
+
 
     def _get_stage1_desc_gemini_web(
         self,
@@ -453,7 +457,9 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         if not ffmpeg_bin:
             return video_path
 
-        temp_compressed = video_path.parent / f"{video_path.stem}_opt.mp4"
+        temp_dir = Path(tempfile.gettempdir()) / "cotent_voice_opt"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_compressed = temp_dir / f"{video_path.stem}_opt_{os.getpid()}_{int(time.time())}.mp4"
         try:
             cmd = [
                 ffmpeg_bin,
@@ -921,7 +927,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
         progress_cb: Optional[Callable[[str, float], None]] = kwargs.get("progress_callback")
 
         video_info = kwargs.get("video_info")
-        clips_list = getattr(video_info, "clips", []) if video_info else []
+        clips_list = [
+            p for p in getattr(video_info, "clips", [])
+            if Path(p).exists() and not Path(p).name.endswith("_opt.mp4") and not Path(p).name.startswith(".")
+        ] if video_info else []
 
         if clips_list and len(clips_list) > 0:
             total_clips = len(clips_list)
@@ -994,6 +1003,10 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                     frame_path, i, total_clips, custom_instructions=custom_instructions, clip_video_path=clip_video_path
                 )
 
+            watermark_val = self._extract_watermark(stage1_desc)
+            if watermark_val:
+                _logger.info("📌 [Watermark/Chữ trên video] Clip {}: '{}'", clip_num, watermark_val)
+
             # --- STAGE 2: Content Writing ---
             if self._write_content_engine == "openai_api":
                 script_part = self._get_stage2_script_openai_api(
@@ -1034,6 +1047,7 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
                         voice_filename=voice_name,
                         webhook_url=sheet_webhook,
                         job_id=job_id,
+                        watermark=watermark_val,
                     )
             except Exception as live_err:
                 _logger.warning("Live push clip {} error: {}", clip_num, live_err)
@@ -1061,6 +1075,43 @@ class MultiAgentReviewProvider(BaseReviewGenerator):
 
         _logger.info("Finished per-clip review generation ({} clips, {} total words)", total_clips, total_words)
         return Result.Ok(res)
+
+    @staticmethod
+    def _extract_watermark(stage1_text: str) -> str:
+        """Trích xuất chữ / watermark / ID channel ở góc màn hình từ bài phân tích Stage 1 của Gemini."""
+        if not stage1_text:
+            return ""
+        import re
+        pattern = r"(?:Watermark|Chữ|Text|Logo)(?:\s*/\s*(?:Text|Chữ))?(?:\s*trên\s*video|\s*ở\s*góc\s*màn\s*hình|\s*màn\s*hình)?\s*:\s*([\s\S]*?)(?=\n\s*\*\*|\n\s*[A-ZÀ-Ỹ0-9\-\.\#\:\_]{3,}\s*:|$)"
+        m = re.search(pattern, stage1_text, re.IGNORECASE)
+        if m:
+            raw_text = m.group(1).strip()
+            raw_text = re.sub(r"\*+", "", raw_text).strip()
+            lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+            if not lines:
+                return ""
+            full_line = " ".join(lines)
+            
+            if full_line.lower() in ("không có", "khong co", "none", "n/a", "không", "không thấy", "chưa thấy", "không xuất hiện", "trường hợp này không có"):
+                return ""
+            
+            # Look for quotes e.g. "Cr: Terry Noah" or "Cr: Djamel Hadj Aissa"
+            quotes = re.findall(r'["\']([^"\']+)["\']', full_line)
+            if quotes:
+                return quotes[0].strip()
+                
+            # Look for @username
+            user_match = re.search(r'@[A-Za-z0-9_.]+', full_line)
+            if user_match:
+                return user_match.group(0).strip()
+                
+            # Remove prefix chatter if followed by text
+            full_line = re.sub(r"^(?:Góc\s*(?:dưới|trên)?\s*(?:bên\s*)?(?:trái|phải)?\s*(?:màn\s*hình)?\s*(?:có\s*dòng\s*chữ|có\s*chữ|hiển\s*thị)?\s*:?\s*)", "", full_line, flags=re.IGNORECASE).strip()
+            
+            if full_line.lower() in ("không có", "khong co", "none", "n/a", "không"):
+                return ""
+            return full_line
+        return ""
 
     def generate_async(self, *args, **kwargs):
         raise NotImplementedError("Use synchronous generate")

@@ -2,16 +2,15 @@
 """
 src/core/workflow.py
 
-WorkflowEngine – the single orchestration entry-point for the AI Movie Review
-pipeline with checkpoint save & resume capability.
+WorkflowEngine – orchestration entry-point for the AI Movie Review pipeline.
 
-Responsibilities:
-* Accept every provider through the constructor (dependency injection).
-* Execute providers in the correct order.
-* Save checkpoints after each stage into data/jobs/<job_id>/checkpoint.json.
-* Allow resuming interrupted/failed jobs without restarting heavy stages (like STT).
-* Pass job_id to every logging call for full traceability.
-* Return Result.Ok(output_path) on success or Result.Err(exc) on provider failure.
+Pipeline (simplified):
+  1. VideoLoader   – load & split video into clips
+  2. ReviewGenerator – per-clip AI analysis + content writing (MultiAgent)
+  3. TTS           – synthesise narration audio
+  4. VideoComposer – merge audio onto original video
+
+Checkpoint/resume is supported after each stage.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ import json
 import os
 import pickle
 import time
-import threading
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -28,12 +26,6 @@ from typing import Callable, Optional, Any, Dict
 
 from src.core.result import Result
 from src.core.video_loader import VideoLoader
-from src.core.audio_extractor import AudioExtractor
-from src.stt.base import BaseSTT
-from src.scene.base import BaseSceneDetector
-from src.frame.base import BaseFrameExtractor
-from src.vision.base import BaseVisionAnalyzer
-from src.timeline.base import BaseTimelineBuilder
 from src.review.base import BaseReviewGenerator
 from src.tts.base import BaseTTS
 from src.composer.base import BaseVideoComposer
@@ -43,31 +35,19 @@ _logger = get_logger("workflow")
 
 
 class WorkflowEngine:
-    """Orchestrates the end-to-end AI movie-review pipeline with checkpoint and resume support."""
+    """Orchestrates the AI movie-review pipeline: load → review → tts → compose."""
 
     def __init__(
         self,
         video_loader: VideoLoader,
-        stt: BaseSTT,
-        scene_detector: BaseSceneDetector,
-        frame_extractor: BaseFrameExtractor,
-        vision_analyzer: BaseVisionAnalyzer,
-        timeline_builder: BaseTimelineBuilder,
         review_generator: BaseReviewGenerator,
         tts: BaseTTS,
         video_composer: BaseVideoComposer,
-        audio_extractor: Optional[AudioExtractor] = None,
     ) -> None:
         self._video_loader = video_loader
-        self._stt = stt
-        self._scene_detector = scene_detector
-        self._frame_extractor = frame_extractor
-        self._vision_analyzer = vision_analyzer
-        self._timeline_builder = timeline_builder
         self._review_generator = review_generator
         self._tts = tts
         self._video_composer = video_composer
-        self._audio_extractor = audio_extractor or AudioExtractor()
 
     # ------------------------------------------------------------------
     # Checkpoint & Resume Helpers
@@ -270,181 +250,22 @@ class WorkflowEngine:
                 return r_video
             video_info = r_video.unwrap()
             self._save_checkpoint(job_id, "VideoLoader", video_info)
-        _notify("VideoLoader", 0.1)
+        else:
+            if video_info and getattr(video_info, "clips", None):
+                valid_clips = [
+                    p for p in video_info.clips
+                    if Path(p).exists() and not Path(p).name.endswith("_opt.mp4") and not Path(p).name.startswith(".")
+                ]
+                if len(valid_clips) != len(video_info.clips):
+                    log.info("Sanitizing VideoLoader checkpoint clips: {} cached -> {} valid", len(video_info.clips), len(valid_clips))
+                    video_info = video_info._replace(clips=valid_clips)
+        _notify("VideoLoader", 0.15)
+
+        # Dùng None làm placeholder cho timeline (MultiAgent không cần timeline thật)
+        timeline_result = None
 
         # ----------------------------------------------------------------
-        # Stage 1.5 – Audio Extractor
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        audio_path = self._load_checkpoint(job_id, "AudioExtractor") if resume else None
-        if audio_path is None or not Path(str(audio_path)).exists():
-            if use_gemini_web:
-                log.info("Gemini Web mode active. Bypassing AudioExtractor stage.")
-                audio_path = Path("data") / "jobs" / job_id / "audio" / "empty.wav"
-            else:
-                r_audio = self._stage(
-                    job_id, "AudioExtractor",
-                    lambda: self._audio_extractor.extract(video_path, job_id),
-                    input_path=video_path,
-                    output_path=Path("data") / "jobs" / job_id / "audio" / "audio.wav",
-                    provider_obj=self._audio_extractor,
-                )
-                if r_audio.is_err:
-                    return r_audio
-                audio_path = r_audio.unwrap()
-            self._save_checkpoint(job_id, "AudioExtractor", audio_path)
-        _notify("AudioExtractor", 0.2)
-
-        # ----------------------------------------------------------------
-        # Stage 2 – STT
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        stt_result = self._load_checkpoint(job_id, "STT") if resume else None
-        if stt_result is None:
-            if use_gemini_web:
-                from src.stt.models import STTResult, Transcript, LanguageInfo
-                log.info("Gemini Web mode active. Bypassing STT stage.")
-                stt_result = STTResult(
-                    transcript=Transcript(segments=[]),
-                    language=LanguageInfo(code="vi", name="Vietnamese"),
-                    model_name="bypass",
-                    processing_time_secs=0.0,
-                    audio_path=audio_path,
-                )
-            else:
-                def _stt_wrapper() -> Result:
-                    stop_ticker = threading.Event()
-                    def _ticker():
-                        while not stop_ticker.wait(5.0):
-                            log.info("[STT] Transcription in progress...")
-                    ticker_thread = threading.Thread(target=_ticker, daemon=True)
-                    ticker_thread.start()
-                    try:
-                        return self._stt.transcribe(audio_path)
-                    finally:
-                        stop_ticker.set()
-
-                r_stt = self._stage(
-                    job_id, "STT",
-                    _stt_wrapper,
-                    input_path=audio_path,
-                    provider_obj=self._stt,
-                )
-                if r_stt.is_err:
-                    return r_stt
-                stt_result = r_stt.unwrap()
-            self._save_checkpoint(job_id, "STT", stt_result)
-        _notify("STT", 0.3)
-
-        # ----------------------------------------------------------------
-        # Stage 3 – Scene Detection
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        scene_result = self._load_checkpoint(job_id, "SceneDetection") if resume else None
-        if scene_result is None:
-            r_scene = self._stage(
-                job_id, "SceneDetection",
-                lambda: self._scene_detector.detect(video_path),
-                input_path=video_path,
-                provider_obj=self._scene_detector,
-            )
-            if r_scene.is_err:
-                return r_scene
-            scene_result = r_scene.unwrap()
-            self._save_checkpoint(job_id, "SceneDetection", scene_result)
-        _notify("SceneDetection", 0.4)
-
-        # ----------------------------------------------------------------
-        # Stage 4 – Frame Extraction
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        frame_result = self._load_checkpoint(job_id, "FrameExtraction") if resume else None
-        if frame_result is None:
-            rev_engine = getattr(self._review_generator, "_review_video_engine", "")
-            if use_gemini_web and rev_engine == "gemini_web":
-                from src.frame.models import FrameExtractionResult
-                log.info("Gemini Web mode active. Bypassing FrameExtraction stage.")
-                frame_result = FrameExtractionResult.empty()
-            else:
-                r_frame = self._stage(
-                    job_id, "FrameExtraction",
-                    lambda: self._frame_extractor.extract(video_path, scene_result),
-                    input_path=video_path,
-                    output_path=Path("data") / "jobs" / job_id / "frames",
-                    provider_obj=self._frame_extractor,
-                )
-                if r_frame.is_err:
-                    return r_frame
-                frame_result = r_frame.unwrap()
-            self._save_checkpoint(job_id, "FrameExtraction", frame_result)
-        _notify("FrameExtraction", 0.5)
-
-        # ----------------------------------------------------------------
-        # Stage 5 – Vision Analysis
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        vision_result = self._load_checkpoint(job_id, "VisionAnalysis") if resume else None
-        if vision_result is None:
-            is_multi_agent = (
-                use_gemini_web
-                or type(self._review_generator).__name__ == "MultiAgentReviewProvider"
-            )
-            if is_multi_agent:
-                from src.vision.models import VisionAnalysisResult
-                log.info("MultiAgent / Decoupled engine mode active. Bypassing separate cloud Vision API stage.")
-                vision_result = VisionAnalysisResult.empty()
-            else:
-                r_vision = self._stage(
-                    job_id, "VisionAnalysis",
-                    lambda: self._vision_analyzer.analyze(frame_result),
-                    input_path=frame_result,
-                    provider_obj=self._vision_analyzer,
-                )
-                if r_vision.is_err:
-                    return r_vision
-                vision_result = r_vision.unwrap()
-            self._save_checkpoint(job_id, "VisionAnalysis", vision_result)
-        _notify("VisionAnalysis", 0.65)
-
-        # ----------------------------------------------------------------
-        # Stage 6 – Timeline Builder & Analysis Data Export
-        # ----------------------------------------------------------------
-        if (cancelled := _check_cancel()) is not None:
-            return cancelled
-
-        timeline_result = self._load_checkpoint(job_id, "TimelineBuilder") if resume else None
-        if timeline_result is None:
-            r_timeline = self._stage(
-                job_id, "TimelineBuilder",
-                lambda: self._timeline_builder.build(stt_result, vision_result, video_info),
-                provider_obj=self._timeline_builder,
-            )
-            if r_timeline.is_err:
-                return r_timeline
-            timeline_result = r_timeline.unwrap()
-            self._save_checkpoint(job_id, "TimelineBuilder", timeline_result)
-
-        # Automatically export structured Analysis Data (JSON, CSV, MD)
-        try:
-            from src.exporter.analysis_exporter import AnalysisExporter
-            AnalysisExporter.export(job_id=job_id, timeline=timeline_result)
-        except Exception as exc:
-            log.warning("Analysis export warning: {}", exc)
-
-        _notify("TimelineBuilder", 0.75)
-
-        # ----------------------------------------------------------------
-        # Stage 7 – Review Generation & Google Sheet Export
+        # Stage 2 – Review Generation & Google Sheet Export
         # ----------------------------------------------------------------
         if (cancelled := _check_cancel()) is not None:
             return cancelled
@@ -511,7 +332,7 @@ class WorkflowEngine:
             return Result.Ok(output_path)
 
         # ----------------------------------------------------------------
-        # Stage 8 – Text-to-Speech
+        # Stage 3 – Text-to-Speech
         # ----------------------------------------------------------------
         if (cancelled := _check_cancel()) is not None:
             return cancelled
@@ -544,7 +365,7 @@ class WorkflowEngine:
         _notify("TextToSpeech", 0.92)
 
         # ----------------------------------------------------------------
-        # Stage 9 – Video Composer
+        # Stage 4 – Video Composer
         # ----------------------------------------------------------------
         if (cancelled := _check_cancel()) is not None:
             return cancelled

@@ -35,13 +35,6 @@ from src.core.video_loader import VideoInfo, VideoLoader
 from src.core.workflow import WorkflowEngine
 from src.gemini_web.gemini_web_provider import GeminiWebProvider
 from src.gemini_web.models import SessionStatus
-from src.stt.providers.faster_whisper_provider import FasterWhisperProvider
-from src.scene.providers.pyscenedetect_provider import PySceneDetectProvider
-from src.frame.providers.opencv_frame_provider import OpenCVFrameProvider
-from src.vision.providers.gemini_vision_provider import GeminiVisionProvider
-from src.timeline.providers.timeline_builder import TimelineBuilderProvider
-from src.review.providers.gemini_review_provider import GeminiReviewProvider
-from src.review.providers.openai_review_provider import OpenAIReviewProvider
 from src.tts.providers.capcut_tts_provider import CapCutTTSProvider
 from src.tts.providers.elevenlabs_tts_provider import ElevenLabsTTSProvider
 from src.composer.providers.ffmpeg_video_composer import FFmpegVideoComposer
@@ -328,7 +321,7 @@ DEFAULT_JOB1_PROMPT = (
     "Vai trò: Quan sát video và cung cấp thông tin hình ảnh chính xác cho người viết content.\n"
     "Hãy mô tả chi tiết: Mô tả diễn biến, Nhân vật xuất hiện, Hành động chính, Khoảnh khắc đắt giá nhất, "
     "Biểu cảm và ngôn ngữ cơ thể, Mối tương tác trong cảnh, Bối cảnh, Yếu tố an toàn, "
-    "Thông tin chưa chắc chắn, Thời lượng cảnh."
+    "Watermark / Text trên video, Thông tin chưa chắc chắn, Thời lượng cảnh."
 )
 
 DEFAULT_JOB2_PROMPT = (
@@ -2858,11 +2851,6 @@ class MainWindow(ctk.CTk):
 
             engine = WorkflowEngine(
                 video_loader=VideoLoader(),
-                stt=FasterWhisperProvider(config=CONFIG),
-                scene_detector=PySceneDetectProvider(config=CONFIG),
-                frame_extractor=OpenCVFrameProvider(config=CONFIG),
-                vision_analyzer=GeminiVisionProvider(config=CONFIG),
-                timeline_builder=TimelineBuilderProvider(config=CONFIG),
                 review_generator=review_gen,
                 tts=tts_provider,
                 video_composer=FFmpegVideoComposer(config=CONFIG),
